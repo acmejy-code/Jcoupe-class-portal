@@ -4,7 +4,7 @@ import { PORTAL_CONFIG } from "./portal-config.js";
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 const projectId=new URLSearchParams(location.search).get("project")||PORTAL_CONFIG.defaultProjectId;
-const classKey=`jcoupe_portal_class_${projectId}`;
+const classKey=`class_portal_selected_${projectId}`;
 
 let meta=null;
 let classDocs={};
@@ -63,7 +63,7 @@ function renderSelected(){
     $("currentSession").textContent="";
     $("lastDate").textContent="-";
     $("lastType").textContent="-";
-    $("detail").textContent="관리자 시스템에서 학생 공개용 진도를 발행하면 이곳에 표시됩니다.";
+    $("detail").textContent="수업 진도가 공개되면 이곳에 표시됩니다.";
     $("nextStart").textContent="-";
     $("updatedAt").textContent="최종 업데이트: -";
     $("historyList").innerHTML=`<div class="empty">공개된 최근 수업 기록이 없습니다.</div>`;
@@ -98,7 +98,7 @@ async function init(){
   renderMeta();
   renderSelected();
   try{
-    setStatus("Firebase 연결 중");
+    setStatus("수업 정보 연결 중");
     const [appMod,fsMod]=await Promise.all([
       import("https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js"),
       import("https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js")
@@ -110,10 +110,10 @@ async function init(){
     fsMod.onSnapshot(metaRef,snap=>{
       if(snap.exists()){
         meta={id:snap.id,...snap.data()};
-        setStatus("실시간 연결","online");
+        setStatus("최신 정보 연결","online");
       }else{
         meta=null;
-        setStatus("공개 준비 중");
+        setStatus("공개 정보 준비 중");
       }
       renderMeta();
       renderSelected();
