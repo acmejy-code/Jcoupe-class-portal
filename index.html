@@ -21,90 +21,88 @@
       </div>
     </header>
 
+    <nav class="portal-nav" aria-label="포털 메뉴">
+      <button class="portal-tab active" data-view="progress">수업 진도</button>
+      <button class="portal-tab" data-view="materials">수업 자료실</button>
+    </nav>
+
     <main>
       <section class="card class-card">
         <div class="section-head">
           <div>
             <h2>우리 반 선택</h2>
-            <p>반을 선택하면 현재 진도와 최근 수업 내용을 확인할 수 있습니다.</p>
+            <p>반을 선택하면 우리 반의 진도와 공개 자료를 확인할 수 있습니다.</p>
           </div>
         </div>
         <div class="class-tabs" id="classTabs"></div>
       </section>
 
-      <section class="grid">
-        <article class="card current-card">
-          <div class="section-head">
+      <div id="view-progress" class="portal-view active">
+        <section class="grid">
+          <article class="card current-card">
+            <div class="section-head">
+              <div>
+                <div class="label" id="currentClassLabel">현재 진도</div>
+                <h2 id="currentTitle">반을 선택해 주세요.</h2>
+              </div>
+              <span class="pill" id="currentSession"></span>
+            </div>
+
+            <div class="info-grid">
+              <div class="info-box"><span>최근 수업일</span><strong id="lastDate">-</strong></div>
+              <div class="info-box"><span>수업 유형</span><strong id="lastType">-</strong></div>
+            </div>
+
+            <div class="content-block">
+              <div class="block-title">이번 시간에 한 내용</div>
+              <div class="block-body" id="detail">수업 진도가 공개되면 이곳에 표시됩니다.</div>
+            </div>
+            <div class="content-block next-block">
+              <div class="block-title">다음 수업 시작점</div>
+              <div class="block-body" id="nextStart">-</div>
+            </div>
+            <div class="meta-line"><span id="updatedAt">최종 업데이트: -</span></div>
+          </article>
+
+          <aside class="card guide-card">
+            <h2>수업 안내</h2>
+            <div class="guide-item"><b>진도 확인</b><span>수업 후 공개된 최신 진도가 자동 반영됩니다.</span></div>
+            <div class="guide-item"><b>다음 수업 준비</b><span>‘다음 수업 시작점’을 보고 교과서와 학습지를 준비하세요.</span></div>
+            <div class="guide-item"><b>자료실</b><span>상단 ‘수업 자료실’에서 선생님이 공개한 PPT, 활동지, 시험 대비 자료를 받을 수 있습니다.</span></div>
+          </aside>
+        </section>
+
+        <section class="card history-card">
+          <div class="section-head"><div><h2>최근 수업 기록</h2><p id="historySubtitle">반을 선택하면 최근 공개 기록이 표시됩니다.</p></div></div>
+          <div id="historyList" class="history-list"></div>
+        </section>
+
+        <section class="notice" id="emptyNotice">
+          <b>아직 공개된 수업 정보가 없습니다.</b>
+          <span>수업 진도가 공개되면 자동으로 표시됩니다.</span>
+        </section>
+      </div>
+
+      <div id="view-materials" class="portal-view">
+        <section class="card materials-card">
+          <div class="materials-head">
             <div>
-              <div class="label" id="currentClassLabel">현재 진도</div>
-              <h2 id="currentTitle">반을 선택해 주세요.</h2>
+              <div class="label" id="materialClassLabel">수업 자료실</div>
+              <h2>수업 자료 다운로드</h2>
+              <p id="materialsSubtitle">선택한 반에 공개된 자료만 표시됩니다.</p>
             </div>
-            <span class="pill" id="currentSession"></span>
+            <div class="material-count" id="materialCount">0개</div>
           </div>
-
-          <div class="info-grid">
-            <div class="info-box">
-              <span>최근 수업일</span>
-              <strong id="lastDate">-</strong>
-            </div>
-            <div class="info-box">
-              <span>수업 유형</span>
-              <strong id="lastType">-</strong>
-            </div>
+          <div class="material-tools">
+            <div class="material-filters" id="materialFilters"></div>
+            <input type="search" id="materialSearch" placeholder="자료명·설명 검색"/>
           </div>
-
-          <div class="content-block">
-            <div class="block-title">이번 시간에 한 내용</div>
-            <div class="block-body" id="detail">수업 진도가 공개되면 이곳에 표시됩니다.</div>
-          </div>
-
-          <div class="content-block next-block">
-            <div class="block-title">다음 수업 시작점</div>
-            <div class="block-body" id="nextStart">-</div>
-          </div>
-
-          <div class="meta-line">
-            <span id="updatedAt">최종 업데이트: -</span>
-          </div>
-        </article>
-
-        <aside class="card guide-card">
-          <h2>수업 안내</h2>
-          <div class="guide-item">
-            <b>진도 확인</b>
-            <span>수업 후 공개된 최신 진도가 자동 반영됩니다.</span>
-          </div>
-          <div class="guide-item">
-            <b>다음 수업 준비</b>
-            <span>‘다음 수업 시작점’을 보고 교과서와 학습지를 준비하세요.</span>
-          </div>
-          <div class="guide-item">
-            <b>자료실</b>
-            <span>수업 자료 다운로드 기능은 다음 단계에서 추가됩니다.</span>
-          </div>
-        </aside>
-      </section>
-
-      <section class="card history-card">
-        <div class="section-head">
-          <div>
-            <h2>최근 수업 기록</h2>
-            <p id="historySubtitle">반을 선택하면 최근 공개 기록이 표시됩니다.</p>
-          </div>
-        </div>
-        <div id="historyList" class="history-list"></div>
-      </section>
-
-      <section class="notice" id="emptyNotice">
-        <b>아직 공개된 수업 정보가 없습니다.</b>
-        <span>수업 진도가 공개되면 자동으로 표시됩니다.</span>
-      </section>
+          <div class="materials-list" id="materialsList"></div>
+        </section>
+      </div>
     </main>
 
-    <footer>
-      <span>독서 토론과 글쓰기</span>
-      <span>학생용 수업 종합 포털</span>
-    </footer>
+    <footer><span>독서 토론과 글쓰기</span><span>학생용 수업 종합 포털</span></footer>
   </div>
 
   <script type="module" src="./js/app.js"></script>

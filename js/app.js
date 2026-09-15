@@ -8,7 +8,11 @@ const classKey=`class_portal_selected_${projectId}`;
 
 let meta=null;
 let classDocs={};
+let materials=[];
 let selectedClass=localStorage.getItem(classKey)||"";
+let currentView="progress";
+let materialCategory="전체";
+let materialQuery="";
 
 function setStatus(text,type=""){
   $("syncStatus").textContent=text;
@@ -28,9 +32,21 @@ function fmtDateTime(v){
     return `${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
   }catch{return "-";}
 }
+function fmtMaterialDate(v){
+  if(!v)return "-";
+  const d=new Date(v);
+  if(Number.isNaN(d.getTime()))return String(v).slice(0,10)||"-";
+  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`;
+}
 function classes(){
-  return (meta?.classes&&Array.isArray(meta.classes)&&meta.classes.length)
-    ? meta.classes : PORTAL_CONFIG.fallbackClasses;
+  return (meta?.classes&&Array.isArray(meta.classes)&&meta.classes.length)?meta.classes:PORTAL_CONFIG.fallbackClasses;
+}
+function setView(name){
+  currentView=name;
+  document.querySelectorAll(".portal-view").forEach(v=>v.classList.toggle("active",v.id===`view-${name}`));
+  document.querySelectorAll(".portal-tab").forEach(b=>b.classList.toggle("active",b.dataset.view===name));
+  if(name==="progress") renderSelected();
+  if(name==="materials") renderMaterials();
 }
 function renderMeta(){
   $("portalTitle").textContent=meta?.portalTitle||PORTAL_CONFIG.fallbackTitle;
@@ -47,13 +63,11 @@ function renderClassTabs(){
     localStorage.setItem(classKey,selectedClass);
     renderClassTabs();
     renderSelected();
+    renderMaterials();
   });
 }
 function renderSelected(){
-  if(!selectedClass){
-    $("emptyNotice").classList.add("show");
-    return;
-  }
+  if(!selectedClass){ $("emptyNotice").classList.add("show"); return; }
   const data=classDocs[selectedClass];
   $("currentClassLabel").textContent=`${selectedClass}반 현재 진도`;
   $("historySubtitle").textContent=`${selectedClass}반 최근 공개 수업 기록`;
@@ -84,19 +98,46 @@ function renderSelected(){
   $("historyList").innerHTML=recent.length?recent.map(r=>`
     <div class="history-row">
       <div class="history-date">${esc(fmtDate(r.date))}</div>
-      <div>
-        <div class="history-title">${esc(r.title||r.type||"수업")}</div>
-        <div class="history-detail">${esc(r.detail||"")}</div>
-        ${r.nextStart?`<div class="history-next">다음: ${esc(r.nextStart)}</div>`:""}
-      </div>
+      <div><div class="history-title">${esc(r.title||r.type||"수업")}</div><div class="history-detail">${esc(r.detail||"")}</div>${r.nextStart?`<div class="history-next">다음: ${esc(r.nextStart)}</div>`:""}</div>
       <div class="history-session">${esc(r.session||r.type||"")}</div>
-    </div>
-  `).join(""):`<div class="empty">공개된 최근 수업 기록이 없습니다.</div>`;
+    </div>`).join(""):`<div class="empty">공개된 최근 수업 기록이 없습니다.</div>`;
+}
+function materialVisibleForClass(m){
+  const targets=Array.isArray(m.targetClasses)?m.targetClasses:[];
+  return targets.length===0||targets.includes("ALL")||targets.includes(selectedClass);
+}
+function renderMaterials(){
+  $("materialClassLabel").textContent=`${selectedClass||""}반 수업 자료실`;
+  $("materialsSubtitle").textContent=`${selectedClass||"선택한"}반에 공개된 자료만 표시됩니다.`;
+  $("materialFilters").innerHTML=PORTAL_CONFIG.materialCategories.map(c=>`<button class="filter-btn ${materialCategory===c?"active":""}" data-category="${esc(c)}">${esc(c)}</button>`).join("");
+  document.querySelectorAll("[data-category]").forEach(b=>b.onclick=()=>{materialCategory=b.dataset.category;renderMaterials();});
+
+  const q=materialQuery.trim().toLowerCase();
+  const rows=materials
+    .filter(materialVisibleForClass)
+    .filter(m=>materialCategory==="전체"||m.category===materialCategory)
+    .filter(m=>!q||[m.title,m.description,m.category,m.fileType].join(" ").toLowerCase().includes(q))
+    .sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
+  $("materialCount").textContent=`${rows.length}개`;
+  $("materialsList").innerHTML=rows.length?rows.map(m=>`
+    <article class="material-item">
+      <div class="material-item-top">
+        <div class="material-badges"><span class="badge category">${esc(m.category||"수업자료")}</span><span class="badge type">${esc(m.fileType||"기타")}</span></div>
+        <time>${esc(fmtMaterialDate(m.updatedAt||m.createdAt))}</time>
+      </div>
+      <h3>${esc(m.title||"수업 자료")}</h3>
+      ${m.description?`<p>${esc(m.description)}</p>`:"<p class=\"muted-text\">자료 설명이 없습니다.</p>"}
+      <div class="material-item-actions">
+        ${m.previewUrl||m.driveUrl?`<a class="action-btn secondary" href="${esc(m.previewUrl||m.driveUrl)}" target="_blank" rel="noopener">미리 보기</a>`:""}
+        ${m.downloadUrl?`<a class="action-btn primary" href="${esc(m.downloadUrl)}" target="_blank" rel="noopener">다운로드</a>`:""}
+      </div>
+    </article>`).join(""):`<div class="materials-empty"><b>등록된 자료가 없습니다.</b><span>선생님이 자료를 공개하면 이곳에 표시됩니다.</span></div>`;
 }
 
 async function init(){
-  renderMeta();
-  renderSelected();
+  document.querySelectorAll(".portal-tab").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+  $("materialSearch").oninput=e=>{materialQuery=e.target.value;renderMaterials();};
+  renderMeta(); renderSelected(); renderMaterials();
   try{
     setStatus("수업 정보 연결 중");
     const [appMod,fsMod]=await Promise.all([
@@ -106,36 +147,21 @@ async function init(){
     const app=appMod.initializeApp(firebaseConfig);
     const db=fsMod.getFirestore(app);
 
-    const metaRef=fsMod.doc(db,"publicCourses",projectId);
-    fsMod.onSnapshot(metaRef,snap=>{
-      if(snap.exists()){
-        meta={id:snap.id,...snap.data()};
-        setStatus("최신 정보 연결","online");
-      }else{
-        meta=null;
-        setStatus("공개 정보 준비 중");
-      }
-      renderMeta();
-      renderSelected();
-    },err=>{
-      console.error(err);
-      setStatus("공개 데이터 접근 대기","error");
-      $("emptyNotice").classList.add("show");
-    });
+    fsMod.onSnapshot(fsMod.doc(db,"publicCourses",projectId),snap=>{
+      if(snap.exists()){ meta={id:snap.id,...snap.data()}; setStatus("최신 정보 연결","online"); }
+      else { meta=null; setStatus("공개 정보 준비 중"); }
+      renderMeta(); renderSelected(); renderMaterials();
+    },err=>{ console.error(err); setStatus("공개 데이터 접근 대기","error"); $("emptyNotice").classList.add("show"); });
 
-    const classesRef=fsMod.collection(db,"publicCourses",projectId,"classes");
-    fsMod.onSnapshot(classesRef,snap=>{
-      classDocs={};
-      snap.forEach(d=>classDocs[d.id]={id:d.id,...d.data()});
-      renderSelected();
-    },err=>{
-      console.error(err);
-      setStatus("공개 데이터 접근 대기","error");
-    });
+    fsMod.onSnapshot(fsMod.collection(db,"publicCourses",projectId,"classes"),snap=>{
+      classDocs={}; snap.forEach(d=>classDocs[d.id]={id:d.id,...d.data()}); renderSelected();
+    },err=>{ console.error(err); setStatus("공개 데이터 접근 대기","error"); });
+
+    fsMod.onSnapshot(fsMod.collection(db,"publicCourses",projectId,"materials"),snap=>{
+      materials=[]; snap.forEach(d=>materials.push({id:d.id,...d.data()})); renderMaterials();
+    },err=>{ console.error(err); setStatus("자료실 접근 대기","error"); });
   }catch(err){
-    console.error(err);
-    setStatus("연결 오류","error");
-    $("emptyNotice").classList.add("show");
+    console.error(err); setStatus("연결 오류","error"); $("emptyNotice").classList.add("show");
   }
 }
 init();
