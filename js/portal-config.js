@@ -1,5 +1,5 @@
 export const PORTAL_CONFIG = {
-  version: "1.2.0",
+  version: "1.2.1",
   defaultProjectId: "2026-2-G2-DOKTOGUL",
   fallbackTitle: "독-토-글 수업 종합 포털",
   fallbackSubtitle: "2026학년도 2학년 · 독서 토론과 글쓰기",

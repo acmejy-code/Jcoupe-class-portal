@@ -102,19 +102,15 @@ function renderSelected(){
       <div class="history-session">${esc(r.session||r.type||"")}</div>
     </div>`).join(""):`<div class="empty">공개된 최근 수업 기록이 없습니다.</div>`;
 }
-function materialVisibleForClass(m){
-  const targets=Array.isArray(m.targetClasses)?m.targetClasses:[];
-  return targets.length===0||targets.includes("ALL")||targets.includes(selectedClass);
-}
 function renderMaterials(){
-  $("materialClassLabel").textContent=`${selectedClass||""}반 수업 자료실`;
-  $("materialsSubtitle").textContent=`${selectedClass||"선택한"}반에 공개된 자료만 표시됩니다.`;
+  $("materialClassLabel").textContent="수업 자료실";
+  $("materialsSubtitle").textContent="모든 반이 함께 사용하는 공통 수업 자료입니다.";
   $("materialFilters").innerHTML=PORTAL_CONFIG.materialCategories.map(c=>`<button class="filter-btn ${materialCategory===c?"active":""}" data-category="${esc(c)}">${esc(c)}</button>`).join("");
   document.querySelectorAll("[data-category]").forEach(b=>b.onclick=()=>{materialCategory=b.dataset.category;renderMaterials();});
 
   const q=materialQuery.trim().toLowerCase();
   const rows=materials
-    .filter(materialVisibleForClass)
+    .filter(m=>m.isPublished!==false)
     .filter(m=>materialCategory==="전체"||m.category===materialCategory)
     .filter(m=>!q||[m.title,m.description,m.category,m.fileType].join(" ").toLowerCase().includes(q))
     .sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
