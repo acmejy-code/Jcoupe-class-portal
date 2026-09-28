@@ -97,3 +97,8 @@ body.assessment-focus-mode .portal-nav{display:none}
 .assessment-timer.expired{border-color:#ef4444;background:#fef2f2}.assessment-timer.expired strong{color:#b91c1c}
 .assessment-identity{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.assessment-identity>span{font-size:10px;font-weight:900;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:999px;padding:3px 7px}
 @media(max-width:620px){.assessment-head-tools{justify-content:flex-start}.assessment-timer{width:100%}}
+
+.assessment-waiting-room{max-width:760px;margin:0 auto}
+.assessment-waiting-room .materials-empty{margin-top:18px;padding:34px 20px;text-align:center}
+.assessment-waiting-room .materials-empty b{font-size:1.18rem}
+.assessment-waiting-room .materials-empty span{display:block;margin-top:10px;line-height:1.7}
