@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <meta name="theme-color" content="#0f172a"/>
   <title>독-토-글 수업 종합 포털</title>
-  <link rel="stylesheet" href="./styles.css"/>
+  <link rel="stylesheet" href="./styles.css?v=1.6.3"/>
 </head>
 <body>
   <div id="adminPreviewBanner" class="admin-preview-banner hidden">
@@ -78,6 +78,32 @@
           </aside>
         </section>
 
+        <section class="card student-calendar-card">
+          <div class="student-calendar-head">
+            <div>
+              <div class="label">학사일정 · 수업 진도</div>
+              <h2 id="studentCalendarTitle">수업 달력</h2>
+              <p id="studentCalendarSubtitle">선택한 반의 수업 일정과 학교 학사일정을 함께 확인할 수 있습니다.</p>
+            </div>
+            <div class="student-calendar-actions" aria-label="달력 월 이동">
+              <button type="button" id="studentCalendarPrev" aria-label="이전 달">‹</button>
+              <strong id="studentMonthTitle">-</strong>
+              <button type="button" id="studentCalendarNext" aria-label="다음 달">›</button>
+              <button type="button" id="studentCalendarToday" class="today-btn">오늘</button>
+            </div>
+          </div>
+          <div class="student-calendar-legend">
+            <span><i class="legend-dot academic-dot"></i>학사일정</span>
+            <span><i class="legend-dot record-dot"></i>수업 기록</span>
+            <span><i class="legend-dot scheduled-dot"></i>수업 예정</span>
+            <span><i class="legend-dot no-class-dot"></i>수업 없음</span>
+          </div>
+          <div class="student-calendar-scroll">
+            <div id="studentCalendar" class="student-calendar"></div>
+          </div>
+          <div class="student-calendar-note">※ 학사일정과 수업계획은 선생님이 학생 포털에 공개한 최신 자료를 기준으로 표시됩니다.</div>
+        </section>
+
         <section class="card history-card">
           <div class="section-head"><div><h2>최근 수업 기록</h2><p id="historySubtitle">반을 선택하면 최근 공개 기록이 표시됩니다.</p></div></div>
           <div id="historyList" class="history-list"></div>
@@ -143,6 +169,6 @@
     <footer><span>독서 토론과 글쓰기</span><span>학생용 수업 종합 포털</span></footer>
   </div>
 
-  <script type="module" src="./js/app.js?v=1.6.2"></script>
+  <script type="module" src="./js/app.js?v=1.6.3"></script>
 </body>
 </html>

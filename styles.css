@@ -104,3 +104,31 @@ body.assessment-focus-mode .portal-nav{display:none}
 .assessment-waiting-room .materials-empty span{display:block;margin-top:10px;line-height:1.7}
 
 .waiting-room-actions{display:flex;justify-content:center;margin:18px 0 8px}
+
+
+/* v1.6.3 - 학생용 학사일정·수업진도 달력 */
+.student-calendar-card{padding:20px;margin-bottom:14px}
+.student-calendar-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.student-calendar-head h2{margin:0;font-size:21px;letter-spacing:-.02em}
+.student-calendar-head p{margin:5px 0 0;color:var(--muted);font-size:13px}
+.student-calendar-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.student-calendar-actions button{border:1px solid var(--line);background:#fff;color:#334155;border-radius:10px;min-width:38px;height:36px;padding:0 10px;font-weight:950;cursor:pointer}
+.student-calendar-actions button:hover{background:#f8fafc;border-color:#94a3b8}
+.student-calendar-actions .today-btn{min-width:auto;padding:0 12px;color:#1d4ed8;border-color:#bfdbfe;background:#eff6ff}
+.student-calendar-actions strong{min-width:100px;text-align:center;font-size:14px}
+.student-calendar-legend{display:flex;gap:12px;flex-wrap:wrap;margin:15px 0 10px;padding-top:13px;border-top:1px solid var(--line);font-size:11px;color:#64748b;font-weight:800}
+.student-calendar-legend span{display:inline-flex;align-items:center;gap:5px}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:3px}
+.academic-dot{background:#f59e0b}.record-dot{background:#2563eb}.scheduled-dot{background:#94a3b8}.no-class-dot{background:#fee2e2;border:1px solid #fecaca}
+.student-calendar-scroll{overflow-x:auto;padding-bottom:4px}.student-calendar{display:grid;grid-template-columns:repeat(7,minmax(104px,1fr));min-width:760px;border-left:1px solid var(--line);border-top:1px solid var(--line);background:#fff}
+.student-cal-dow{padding:9px 6px;text-align:center;font-size:11px;font-weight:950;color:#475569;background:#f8fafc;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.student-cal-dow:first-child{color:#dc2626}.student-cal-dow:nth-child(7){color:#2563eb}
+.student-cal-day{min-height:132px;padding:7px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff;position:relative}
+.student-cal-day.muted{background:#f8fafc;color:#94a3b8}.student-cal-day.no-class{background:#fff7f7}.student-cal-day.is-today{box-shadow:inset 0 0 0 2px #60a5fa}
+.student-cal-date{display:flex;justify-content:space-between;align-items:center;gap:4px;margin-bottom:6px;font-size:11px;font-weight:950}.student-cal-date b{font-size:9px;color:#1d4ed8;background:#dbeafe;border-radius:999px;padding:2px 5px}
+.student-cal-academic{margin:4px 0;padding:4px 5px;border-radius:6px;background:#fffbeb;color:#92400e;border:1px solid #fde68a;font-size:9px;font-weight:900;line-height:1.35;word-break:keep-all}
+.student-cal-record,.student-cal-scheduled{margin:4px 0;padding:5px 6px;border-radius:7px;line-height:1.35;word-break:keep-all}
+.student-cal-record{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a}.student-cal-record strong,.student-cal-scheduled strong{display:block;font-size:9px}.student-cal-record span{display:block;font-size:9px;margin-top:2px;color:#334155}.student-cal-record small{display:block;margin-top:3px;font-size:8px;color:#1d4ed8;font-weight:900}
+.student-cal-scheduled{background:#f8fafc;border:1px dashed #cbd5e1;color:#475569}.student-cal-scheduled small{display:block;margin-top:3px;font-size:8px;color:#2563eb;font-weight:900}
+.student-calendar-note{margin-top:9px;font-size:10px;color:#94a3b8;text-align:right}
+.student-calendar-empty{grid-column:1/-1;padding:36px 14px;text-align:center;color:#94a3b8;font-size:12px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+@media(max-width:720px){.student-calendar-head{flex-direction:column}.student-calendar-actions{width:100%;justify-content:flex-start}.student-calendar-note{text-align:left}.student-cal-day{min-height:118px}}
