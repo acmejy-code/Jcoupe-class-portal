@@ -102,3 +102,5 @@ body.assessment-focus-mode .portal-nav{display:none}
 .assessment-waiting-room .materials-empty{margin-top:18px;padding:34px 20px;text-align:center}
 .assessment-waiting-room .materials-empty b{font-size:1.18rem}
 .assessment-waiting-room .materials-empty span{display:block;margin-top:10px;line-height:1.7}
+
+.waiting-room-actions{display:flex;justify-content:center;margin:18px 0 8px}
