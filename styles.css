@@ -106,7 +106,7 @@ body.assessment-focus-mode .portal-nav{display:none}
 .waiting-room-actions{display:flex;justify-content:center;margin:18px 0 8px}
 
 
-/* v1.6.3 - 학생용 학사일정·수업진도 달력 */
+/* v1.6.4 - 학생용 학사일정·수업진도 달력 */
 .student-calendar-card{padding:20px;margin-bottom:14px}
 .student-calendar-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
 .student-calendar-head h2{margin:0;font-size:21px;letter-spacing:-.02em}
