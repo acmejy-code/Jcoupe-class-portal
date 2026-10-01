@@ -106,7 +106,7 @@ body.assessment-focus-mode .portal-nav{display:none}
 .waiting-room-actions{display:flex;justify-content:center;margin:18px 0 8px}
 
 
-/* v1.6.4 - 학생용 학사일정·수업진도 달력 */
+/* v1.6.5 - 학생용 학사일정·수업진도 달력 */
 .student-calendar-card{padding:20px;margin-bottom:14px}
 .student-calendar-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
 .student-calendar-head h2{margin:0;font-size:21px;letter-spacing:-.02em}
@@ -132,3 +132,5 @@ body.assessment-focus-mode .portal-nav{display:none}
 .student-calendar-note{margin-top:9px;font-size:10px;color:#94a3b8;text-align:right}
 .student-calendar-empty{grid-column:1/-1;padding:36px 14px;text-align:center;color:#94a3b8;font-size:12px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
 @media(max-width:720px){.student-calendar-head{flex-direction:column}.student-calendar-actions{width:100%;justify-content:flex-start}.student-calendar-note{text-align:left}.student-cal-day{min-height:118px}}
+
+/* v1.6.7 - 연결/저장 안정화는 동작 로직 개선, 기존 응시 UI 유지 */

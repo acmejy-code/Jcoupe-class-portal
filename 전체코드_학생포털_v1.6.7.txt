@@ -1,3 +1,352 @@
+JCOUP 학생 포털 v1.6.7 전체 코드
+
+================================================================================
+
+===== index.html =====
+
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="theme-color" content="#0f172a"/>
+  <title>독-토-글 수업 종합 포털</title>
+  <link rel="stylesheet" href="./styles.css?v=1.6.7"/>
+</head>
+<body>
+  <div id="adminPreviewBanner" class="admin-preview-banner hidden">
+    <span><b>관리자 테스트 모드</b> · 이 창에서 작성·제출한 내용은 서버에 저장되지 않습니다.</span>
+    <button type="button" id="closeAdminPreviewWindowBtn">테스트 창 닫기</button>
+  </div>
+  <div class="shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">2026학년도 · 독서 토론과 글쓰기</div>
+        <h1 id="portalTitle">독-토-글 수업 종합 포털</h1>
+        <p id="portalSubtitle">2026학년도 2학년 · 독서 토론과 글쓰기</p>
+      </div>
+      <div class="status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="syncStatus">연결 준비 중</span>
+      </div>
+    </header>
+
+    <nav class="portal-nav" aria-label="포털 메뉴">
+      <button class="portal-tab active" data-view="progress">수업 진도</button>
+      <button class="portal-tab" data-view="materials">수업 자료실</button>
+      <button class="portal-tab" data-view="notices">공지</button>
+      <button class="portal-tab" data-view="assessment">수행평가</button>
+    </nav>
+
+    <main>
+      <div id="view-progress" class="portal-view active">
+        <section class="card class-card">
+          <div class="section-head">
+            <div>
+              <h2>우리 반 선택</h2>
+              <p>반을 선택하면 우리 반의 수업 진도를 확인할 수 있습니다.</p>
+            </div>
+          </div>
+          <div class="class-tabs" id="classTabs"></div>
+        </section>
+
+        <section class="grid">
+          <article class="card current-card">
+            <div class="section-head">
+              <div>
+                <div class="label" id="currentClassLabel">현재 진도</div>
+                <h2 id="currentTitle">반을 선택해 주세요.</h2>
+              </div>
+              <span class="pill" id="currentSession"></span>
+            </div>
+
+            <div class="info-grid">
+              <div class="info-box"><span>최근 수업일</span><strong id="lastDate">-</strong></div>
+              <div class="info-box"><span>수업 유형</span><strong id="lastType">-</strong></div>
+            </div>
+
+            <div class="content-block">
+              <div class="block-title">이번 시간에 한 내용</div>
+              <div class="block-body" id="detail">수업 진도가 공개되면 이곳에 표시됩니다.</div>
+            </div>
+            <div class="content-block next-block">
+              <div class="block-title">다음 수업 시작점</div>
+              <div class="block-body" id="nextStart">-</div>
+            </div>
+            <div class="meta-line"><span id="updatedAt">최종 업데이트: -</span></div>
+          </article>
+
+          <aside class="card guide-card">
+            <h2>수업 안내</h2>
+            <div class="guide-item"><b>진도 확인</b><span>수업 후 공개된 최신 진도가 자동 반영됩니다.</span></div>
+            <div class="guide-item"><b>다음 수업 준비</b><span>‘다음 수업 시작점’을 보고 교과서와 학습지를 준비하세요.</span></div>
+            <div class="guide-item"><b>자료실</b><span>상단 ‘수업 자료실’에서 선생님이 공개한 PPT, 활동지, 시험 대비 자료를 받을 수 있습니다.</span></div>
+          </aside>
+        </section>
+
+        <section class="card student-calendar-card">
+          <div class="student-calendar-head">
+            <div>
+              <div class="label">학사일정 · 수업 진도</div>
+              <h2 id="studentCalendarTitle">수업 달력</h2>
+              <p id="studentCalendarSubtitle">선택한 반의 수업 일정과 학교 학사일정을 함께 확인할 수 있습니다.</p>
+            </div>
+            <div class="student-calendar-actions" aria-label="달력 월 이동">
+              <button type="button" id="studentCalendarPrev" aria-label="이전 달">‹</button>
+              <strong id="studentMonthTitle">-</strong>
+              <button type="button" id="studentCalendarNext" aria-label="다음 달">›</button>
+              <button type="button" id="studentCalendarToday" class="today-btn">오늘</button>
+            </div>
+          </div>
+          <div class="student-calendar-legend">
+            <span><i class="legend-dot academic-dot"></i>학사일정</span>
+            <span><i class="legend-dot record-dot"></i>수업 기록</span>
+            <span><i class="legend-dot scheduled-dot"></i>수업 예정</span>
+            <span><i class="legend-dot no-class-dot"></i>수업 없음</span>
+          </div>
+          <div class="student-calendar-scroll">
+            <div id="studentCalendar" class="student-calendar"></div>
+          </div>
+          <div class="student-calendar-note">※ 학사일정과 수업계획은 선생님이 학생 포털에 공개한 최신 자료를 기준으로 표시됩니다.</div>
+        </section>
+
+        <section class="card history-card">
+          <div class="section-head"><div><h2>최근 수업 기록</h2><p id="historySubtitle">반을 선택하면 최근 공개 기록이 표시됩니다.</p></div></div>
+          <div id="historyList" class="history-list"></div>
+        </section>
+
+        <section class="notice" id="emptyNotice">
+          <b>아직 공개된 수업 정보가 없습니다.</b>
+          <span>수업 진도가 공개되면 자동으로 표시됩니다.</span>
+        </section>
+      </div>
+
+      <div id="view-materials" class="portal-view">
+        <section class="card materials-card">
+          <div class="materials-head">
+            <div>
+              <div class="label" id="materialClassLabel">수업 자료실</div>
+              <h2>수업 자료 다운로드</h2>
+              <p id="materialsSubtitle">모든 반이 함께 사용하는 공통 수업 자료입니다.</p>
+            </div>
+            <div class="material-count" id="materialCount">0개</div>
+          </div>
+          <div class="material-tools">
+            <div class="material-filters" id="materialFilters"></div>
+            <input type="search" id="materialSearch" placeholder="자료명·설명 검색"/>
+          </div>
+          <div class="materials-list" id="materialsList"></div>
+        </section>
+      </div>
+
+      <div id="view-notices" class="portal-view">
+        <section class="card notices-card">
+          <div class="materials-head">
+            <div>
+              <div class="label">공지</div>
+              <h2>수업 · 수행평가 공지</h2>
+              <p>선생님이 게시한 일반 공지와 수행평가 안내를 확인하세요.</p>
+            </div>
+            <div class="material-count" id="noticeCount">0개</div>
+          </div>
+          <div class="material-tools">
+            <div class="material-filters" id="noticeFilters"></div>
+            <input type="search" id="noticeSearch" placeholder="공지 제목·내용 검색"/>
+          </div>
+          <div class="notice-list" id="noticeList"></div>
+        </section>
+      </div>
+
+      <div id="view-assessment" class="portal-view">
+        <section class="card assessment-portal-card">
+          <div class="materials-head">
+            <div>
+              <div class="label">수행평가</div>
+              <h2>수행평가 응시</h2>
+              <p>수행평가 시간에만 입장할 수 있습니다. 학번·이름·응시코드를 정확히 입력하세요.</p>
+            </div>
+            <div class="material-count" id="openAssessmentCount">0개</div>
+          </div>
+          <div id="assessmentPortalBody" class="assessment-portal-body"></div>
+        </section>
+      </div>
+    </main>
+
+    <footer><span>독서 토론과 글쓰기</span><span>학생용 수업 종합 포털</span></footer>
+  </div>
+
+  <script type="module" src="./js/app.js?v=1.6.7"></script>
+</body>
+</html>
+
+
+===== styles.css =====
+
+:root{
+  --bg:#f5f7fb;--panel:#ffffff;--line:#dbe3ef;--text:#0f172a;--muted:#64748b;
+  --navy:#0f172a;--blue:#2563eb;--blue-soft:#eff6ff;--green:#16a34a;
+  --shadow:0 8px 28px rgba(15,23,42,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,"Pretendard","Noto Sans KR",sans-serif;color:var(--text);background:var(--bg)}
+button{font:inherit}
+.shell{max-width:1180px;margin:0 auto;padding:28px 20px 36px}
+.hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:18px}
+.eyebrow{font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--blue);margin-bottom:6px}
+.hero h1{margin:0;font-size:30px;letter-spacing:-.03em}
+.hero p{margin:7px 0 0;color:var(--muted);font-size:14px}
+.status{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;font-weight:800}
+.status-dot{width:9px;height:9px;border-radius:50%;background:#94a3b8}
+.status-dot.online{background:var(--green);box-shadow:0 0 0 4px rgba(22,163,74,.1)}
+.status-dot.error{background:#dc2626;box-shadow:0 0 0 4px rgba(220,38,38,.1)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}
+.class-card{padding:18px;margin-bottom:14px}
+.section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.section-head h2{margin:0;font-size:20px;letter-spacing:-.02em}
+.section-head p{margin:5px 0 0;color:var(--muted);font-size:13px}
+.class-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.class-btn{min-width:68px;padding:10px 16px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--text);font-weight:900;cursor:pointer}
+.class-btn:hover{border-color:#93c5fd;background:#f8fbff}
+.class-btn.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:14px;margin-bottom:14px}
+.current-card,.guide-card{padding:20px}
+.label{font-size:12px;color:var(--blue);font-weight:900;margin-bottom:5px}
+.current-card h2{font-size:23px}
+.pill{font-size:12px;font-weight:900;padding:5px 9px;border-radius:999px;background:var(--blue-soft);color:#1d4ed8;white-space:nowrap}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0}
+.info-box{border:1px solid var(--line);background:#f8fafc;border-radius:14px;padding:12px}
+.info-box span{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
+.info-box strong{font-size:15px}
+.content-block{padding:15px 0;border-top:1px solid var(--line)}
+.block-title{font-size:12px;color:var(--muted);font-weight:900;margin-bottom:6px}
+.block-body{font-size:15px;line-height:1.65;white-space:pre-wrap}
+.next-block{background:#f8fbff;border:1px solid #dbeafe;border-radius:14px;padding:14px;margin-top:4px}
+.meta-line{margin-top:14px;color:var(--muted);font-size:11px;text-align:right}
+.guide-card h2{margin:0 0 14px;font-size:19px}
+.guide-item{padding:12px 0;border-bottom:1px solid var(--line)}
+.guide-item:last-child{border-bottom:0}
+.guide-item b{display:block;font-size:13px;margin-bottom:4px}
+.guide-item span{font-size:12px;color:var(--muted);line-height:1.55}
+.history-card{padding:20px}
+.history-list{margin-top:14px}
+.history-row{display:grid;grid-template-columns:90px 1fr auto;gap:14px;align-items:start;padding:14px 0;border-top:1px solid var(--line)}
+.history-row:first-child{border-top:0}
+.history-date{font-size:12px;color:var(--muted);font-weight:900}
+.history-title{font-weight:900;margin-bottom:4px}
+.history-detail{font-size:13px;color:#475569;line-height:1.5}
+.history-next{font-size:11px;color:var(--blue);font-weight:800;margin-top:5px}
+.history-session{font-size:11px;font-weight:900;color:#475569;background:#f1f5f9;padding:4px 7px;border-radius:999px;white-space:nowrap}
+.empty{padding:24px 0;color:var(--muted);font-size:13px;text-align:center}
+.notice{display:none;background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:14px 16px;color:#9a3412;margin-top:14px}
+.notice.show{display:flex;flex-direction:column;gap:3px}
+.notice span{font-size:12px}
+footer{display:flex;justify-content:space-between;gap:12px;color:#94a3b8;font-size:11px;padding:18px 4px 0}
+@media(max-width:820px){.shell{padding:18px 12px 28px}.hero{align-items:flex-start;flex-direction:column}.hero h1{font-size:25px}.grid{grid-template-columns:1fr}}
+@media(max-width:560px){.class-btn{flex:1}.info-grid{grid-template-columns:1fr 1fr}.history-row{grid-template-columns:74px 1fr}.history-session{grid-column:2;justify-self:start}footer{flex-direction:column}}
+
+/* v1.2.0 - 수업 자료실 */
+.portal-nav{display:flex;gap:7px;margin-bottom:14px;overflow:auto}.portal-tab{border:1px solid var(--line);background:#fff;color:var(--text);padding:10px 17px;border-radius:12px;font-weight:900;cursor:pointer;white-space:nowrap}.portal-tab.active{background:var(--navy);border-color:var(--navy);color:#fff}.portal-view{display:none}.portal-view.active{display:block}
+.materials-card{padding:20px}.materials-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.materials-head h2{margin:0;font-size:22px}.materials-head p{margin:5px 0 0;color:var(--muted);font-size:13px}.material-count{min-width:54px;text-align:center;padding:7px 10px;border-radius:999px;background:var(--blue-soft);color:#1d4ed8;font-weight:900;font-size:12px}
+.material-tools{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:18px 0 10px;padding-top:16px;border-top:1px solid var(--line)}.material-filters{display:flex;gap:6px;flex-wrap:wrap}.filter-btn{border:1px solid var(--line);background:#fff;color:#475569;padding:7px 10px;border-radius:999px;font-size:11px;font-weight:900;cursor:pointer}.filter-btn.active{background:#0f172a;color:#fff;border-color:#0f172a}.material-tools input{width:min(270px,100%);padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:#fff}
+.materials-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.material-item{border:1px solid var(--line);border-radius:16px;padding:16px;background:#fff}.material-item-top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.material-item-top time{font-size:10px;color:#94a3b8;white-space:nowrap}.material-badges{display:flex;gap:5px;flex-wrap:wrap}.badge{display:inline-flex;padding:3px 7px;border-radius:999px;font-size:10px;font-weight:900}.badge.category{background:#eff6ff;color:#1d4ed8}.badge.type{background:#f1f5f9;color:#475569}.material-item h3{font-size:17px;margin:11px 0 7px}.material-item p{font-size:12px;color:#64748b;line-height:1.55;margin:0;min-height:38px;white-space:pre-wrap}.muted-text{color:#94a3b8!important}.material-item-actions{display:flex;gap:7px;margin-top:14px}.action-btn{flex:1;text-align:center;text-decoration:none;padding:9px 10px;border-radius:10px;font-size:12px;font-weight:900;border:1px solid var(--line)}.action-btn.secondary{background:#fff;color:#334155}.action-btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}.materials-empty{grid-column:1/-1;display:flex;flex-direction:column;gap:5px;align-items:center;text-align:center;padding:48px 12px;color:var(--muted)}.materials-empty span{font-size:12px}
+@media(max-width:720px){.material-tools{align-items:stretch;flex-direction:column}.material-tools input{width:100%}.materials-list{grid-template-columns:1fr}.materials-head{align-items:center}}
+
+/* v1.3.1 수행평가 응시 */
+.assessment-portal-card{padding:20px}.assessment-portal-body{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}.assessment-open-list{display:grid;gap:10px}.assessment-open-item{display:flex;justify-content:space-between;align-items:center;gap:18px;border:1px solid var(--line);border-radius:15px;padding:16px;background:#fff}.assessment-open-item h3{margin:5px 0 4px}.assessment-open-item p{margin:0 0 6px;color:var(--muted);font-size:13px}.assessment-open-item small{color:#475569;font-weight:700}.assessment-open-badge{display:inline-block;font-size:11px;font-weight:900;color:#166534;background:#dcfce7;padding:4px 7px;border-radius:999px}.assessment-login{max-width:560px;margin:0 auto}.back-link{border:0;background:transparent;color:#2563eb;font-weight:900;cursor:pointer;padding:0;margin-bottom:14px}.assessment-login-title h3{font-size:22px;margin:8px 0 5px}.assessment-login-title p{color:var(--muted);font-size:13px;line-height:1.6}.assessment-login form{display:grid;gap:12px;margin-top:18px}.assessment-login label{font-size:12px;font-weight:900;color:#475569}.assessment-login input{display:block;width:100%;margin-top:6px;padding:12px 13px;border:1px solid var(--line);border-radius:12px;font:inherit;background:#fff}.assessment-enter-btn{border:0;cursor:pointer;margin-top:4px}.assessment-enter-btn:disabled{opacity:.55;cursor:wait}.assessment-message{min-height:20px;color:#dc2626;font-size:12px;font-weight:800}.assessment-exam{max-width:860px;margin:0 auto}.assessment-exam-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.assessment-exam-head h3{font-size:23px;margin:8px 0 4px}.assessment-exam-head p{color:var(--muted);font-size:13px;line-height:1.6;margin:0}.save-state{font-size:11px;font-weight:900;color:#475569;background:#f1f5f9;padding:6px 9px;border-radius:999px;white-space:nowrap}.assessment-identity{margin:15px 0;padding:11px 13px;background:#f8fafc;border:1px solid var(--line);border-radius:12px;font-size:13px}.assessment-questions{display:grid;gap:14px}.assessment-question{display:block;border:1px solid var(--line);border-radius:15px;padding:15px;background:#fff}.assessment-question strong{display:block;line-height:1.55;margin-bottom:10px}.assessment-question textarea{width:100%;min-height:150px;resize:vertical;border:1px solid #cbd5e1;border-radius:10px;padding:12px;font:inherit;line-height:1.65;background:#fff}.assessment-question textarea:focus{outline:2px solid #bfdbfe;border-color:#60a5fa}.assessment-question textarea:disabled{background:#f8fafc;color:#334155}.assessment-submit-bar{position:sticky;bottom:12px;margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;background:#0f172a;color:#fff;padding:12px 14px;border-radius:14px;box-shadow:0 12px 30px rgba(15,23,42,.2)}.assessment-submit-bar span{font-size:12px;color:#cbd5e1}.submitted-box{margin-top:16px;padding:16px;border:1px solid #86efac;background:#f0fdf4;border-radius:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.submitted-box b{color:#166534}.submitted-box span{font-size:12px;color:#15803d;flex:1}.submitted-box .action-btn{cursor:pointer}
+@media(max-width:620px){.assessment-open-item,.assessment-exam-head,.assessment-submit-bar{align-items:stretch;flex-direction:column}.assessment-open-item .action-btn{text-align:center}.assessment-question textarea{min-height:180px}}
+
+/* v1.4.1 관리자 테스트 새 창 */
+.hidden{display:none!important}.admin-preview-banner{position:sticky;top:0;z-index:50;background:#7c3aed;color:#fff;padding:9px 14px;font-size:12px;font-weight:800;box-shadow:0 4px 14px rgba(76,29,149,.18);display:flex;align-items:center;justify-content:space-between;gap:12px}.admin-preview-banner b{font-weight:950}.admin-preview-banner button{border:1px solid rgba(255,255,255,.55);background:#fff;color:#5b21b6;border-radius:9px;padding:6px 10px;font:inherit;font-weight:900;cursor:pointer;white-space:nowrap}.admin-preview-banner button:hover{background:#f5f3ff}.preview-save-state{background:#ede9fe!important;color:#6d28d9!important}@media(max-width:620px){.admin-preview-banner{align-items:stretch;flex-direction:column}.admin-preview-banner button{align-self:flex-end}}
+
+
+/* v1.5.0 - 공지 메뉴 */
+.notices-card{padding:20px}.notice-list{display:grid;gap:11px}.student-notice-item{border:1px solid var(--line);border-radius:16px;background:#fff;padding:17px}.student-notice-top{display:flex;justify-content:space-between;gap:10px;align-items:center}.student-notice-top time{font-size:10px;color:#94a3b8}.student-notice-badge{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:950}.student-notice-badge.assessment{background:#fff7ed;color:#c2410c}.student-notice-badge.general{background:#ecfeff;color:#0e7490}.student-notice-item h3{font-size:18px;margin:11px 0 8px}.student-notice-body{font-size:13px;line-height:1.75;color:#475569;white-space:pre-wrap}.student-notice-files{display:grid;gap:6px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}.student-notice-files>b{font-size:11px;color:#64748b}.student-notice-files a{display:flex;justify-content:space-between;align-items:center;gap:10px;text-decoration:none;border:1px solid var(--line);background:#f8fafc;border-radius:10px;padding:9px 11px;color:#1d4ed8;font-size:12px;font-weight:800}.student-notice-files a:hover{background:#eff6ff;border-color:#bfdbfe}.student-notice-files span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.student-notice-files small{color:#94a3b8;white-space:nowrap}
+
+
+/* v1.5.1 기반 - 수행평가 집중 모드 / 안내문 줄바꿈 보존 */
+body.assessment-focus-mode .portal-nav{display:none}
+.assessment-instructions{color:var(--muted);font-size:13px;line-height:1.75;margin:6px 0 0;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
+
+/* v1.6.0 수행평가 시험시간·자동저장·감독기록 */
+.assessment-preflight{margin:14px 0 4px;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:#f8fafc}
+.assessment-preflight>b{display:block;font-size:12px;margin-bottom:7px;color:#334155}
+.assessment-preflight>div{display:flex;gap:6px;flex-wrap:wrap}
+.assessment-preflight span{font-size:11px;font-weight:900;padding:5px 7px;border-radius:999px}
+.assessment-preflight span.ok{background:#dcfce7;color:#166534}.assessment-preflight span.bad{background:#fee2e2;color:#b91c1c}
+.assessment-head-tools{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end}
+.assessment-timer{min-width:132px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:12px;padding:8px 10px;text-align:center;display:flex;flex-direction:column}
+.assessment-timer span{font-size:10px;color:#64748b;font-weight:800}.assessment-timer strong{font-size:22px;line-height:1.15;color:#0f172a;letter-spacing:.04em}.assessment-timer small{min-height:14px;font-size:9px;color:#64748b;font-weight:900;margin-top:2px}
+.assessment-timer.warn{border-color:#fbbf24;background:#fffbeb}.assessment-timer.warn strong{color:#b45309}
+.assessment-timer.urgent{border-color:#fb7185;background:#fff1f2}.assessment-timer.urgent strong{color:#be123c}
+.assessment-timer.expired{border-color:#ef4444;background:#fef2f2}.assessment-timer.expired strong{color:#b91c1c}
+.assessment-identity{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.assessment-identity>span{font-size:10px;font-weight:900;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:999px;padding:3px 7px}
+@media(max-width:620px){.assessment-head-tools{justify-content:flex-start}.assessment-timer{width:100%}}
+
+.assessment-waiting-room{max-width:760px;margin:0 auto}
+.assessment-waiting-room .materials-empty{margin-top:18px;padding:34px 20px;text-align:center}
+.assessment-waiting-room .materials-empty b{font-size:1.18rem}
+.assessment-waiting-room .materials-empty span{display:block;margin-top:10px;line-height:1.7}
+
+.waiting-room-actions{display:flex;justify-content:center;margin:18px 0 8px}
+
+
+/* v1.6.5 - 학생용 학사일정·수업진도 달력 */
+.student-calendar-card{padding:20px;margin-bottom:14px}
+.student-calendar-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.student-calendar-head h2{margin:0;font-size:21px;letter-spacing:-.02em}
+.student-calendar-head p{margin:5px 0 0;color:var(--muted);font-size:13px}
+.student-calendar-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.student-calendar-actions button{border:1px solid var(--line);background:#fff;color:#334155;border-radius:10px;min-width:38px;height:36px;padding:0 10px;font-weight:950;cursor:pointer}
+.student-calendar-actions button:hover{background:#f8fafc;border-color:#94a3b8}
+.student-calendar-actions .today-btn{min-width:auto;padding:0 12px;color:#1d4ed8;border-color:#bfdbfe;background:#eff6ff}
+.student-calendar-actions strong{min-width:100px;text-align:center;font-size:14px}
+.student-calendar-legend{display:flex;gap:12px;flex-wrap:wrap;margin:15px 0 10px;padding-top:13px;border-top:1px solid var(--line);font-size:11px;color:#64748b;font-weight:800}
+.student-calendar-legend span{display:inline-flex;align-items:center;gap:5px}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:3px}
+.academic-dot{background:#f59e0b}.record-dot{background:#2563eb}.scheduled-dot{background:#94a3b8}.no-class-dot{background:#fee2e2;border:1px solid #fecaca}
+.student-calendar-scroll{overflow-x:auto;padding-bottom:4px}.student-calendar{display:grid;grid-template-columns:repeat(7,minmax(104px,1fr));min-width:760px;border-left:1px solid var(--line);border-top:1px solid var(--line);background:#fff}
+.student-cal-dow{padding:9px 6px;text-align:center;font-size:11px;font-weight:950;color:#475569;background:#f8fafc;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.student-cal-dow:first-child{color:#dc2626}.student-cal-dow:nth-child(7){color:#2563eb}
+.student-cal-day{min-height:132px;padding:7px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff;position:relative}
+.student-cal-day.muted{background:#f8fafc;color:#94a3b8}.student-cal-day.no-class{background:#fff7f7}.student-cal-day.is-today{box-shadow:inset 0 0 0 2px #60a5fa}
+.student-cal-date{display:flex;justify-content:space-between;align-items:center;gap:4px;margin-bottom:6px;font-size:11px;font-weight:950}.student-cal-date b{font-size:9px;color:#1d4ed8;background:#dbeafe;border-radius:999px;padding:2px 5px}
+.student-cal-academic{margin:4px 0;padding:4px 5px;border-radius:6px;background:#fffbeb;color:#92400e;border:1px solid #fde68a;font-size:9px;font-weight:900;line-height:1.35;word-break:keep-all}
+.student-cal-record,.student-cal-scheduled{margin:4px 0;padding:5px 6px;border-radius:7px;line-height:1.35;word-break:keep-all}
+.student-cal-record{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a}.student-cal-record strong,.student-cal-scheduled strong{display:block;font-size:9px}.student-cal-record span{display:block;font-size:9px;margin-top:2px;color:#334155}.student-cal-record small{display:block;margin-top:3px;font-size:8px;color:#1d4ed8;font-weight:900}
+.student-cal-scheduled{background:#f8fafc;border:1px dashed #cbd5e1;color:#475569}.student-cal-scheduled small{display:block;margin-top:3px;font-size:8px;color:#2563eb;font-weight:900}
+.student-calendar-note{margin-top:9px;font-size:10px;color:#94a3b8;text-align:right}
+.student-calendar-empty{grid-column:1/-1;padding:36px 14px;text-align:center;color:#94a3b8;font-size:12px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+@media(max-width:720px){.student-calendar-head{flex-direction:column}.student-calendar-actions{width:100%;justify-content:flex-start}.student-calendar-note{text-align:left}.student-cal-day{min-height:118px}}
+
+/* v1.6.7 - 연결/저장 안정화는 동작 로직 개선, 기존 응시 UI 유지 */
+
+
+===== js/portal-config.js =====
+
+export const PORTAL_CONFIG = {
+  version: "1.6.7",
+  defaultProjectId: "2026-2-G2-DOKTOGUL",
+  fallbackTitle: "독-토-글 수업 종합 포털",
+  fallbackSubtitle: "2026학년도 2학년 · 독서 토론과 글쓰기",
+  fallbackClasses: ["A","B","C","E"],
+  recentLimit: 6,
+  materialCategories: ["전체","수업자료","활동지","PPT","수행평가","시험대비","기타"]
+};
+
+
+===== js/firebase-config.js =====
+
+export const firebaseConfig = {
+  apiKey: "AIzaSyDaFR4L91m5NlWpD33lkn6l9VYPJppAaCg",
+  authDomain: "doktogul-progress.firebaseapp.com",
+  projectId: "doktogul-progress",
+  storageBucket: "doktogul-progress.firebasestorage.app",
+  messagingSenderId: "95481188113",
+  appId: "1:95481188113:web:62c212c71c1b963da0c6b0"
+};
+
+
+===== js/app.js =====
+
 import { firebaseConfig } from "./firebase-config.js?v=1.6.7";
 import { PORTAL_CONFIG } from "./portal-config.js?v=1.6.7";
 
@@ -952,3 +1301,19 @@ window.addEventListener("online",async()=>{
 setInterval(()=>{if(activeAttempt&&activeAttempt.status!=="SUBMITTED"&&assessmentDirty&&!assessmentSaving)saveAssessmentAttempt().catch(()=>{});},6000);
 setInterval(()=>{if(activeAttempt&&activeAttempt.status!=="SUBMITTED"){sendAssessmentHeartbeat();flushPendingMonitorEvents();}},15000);
 init();
+
+
+===== README.md =====
+
+# JCOUP 학생 포털 v1.6.7 — 강제확정 후 최종답안 복구보존
+
+## 누적 기준
+v1.6.6의 입장 재시도, 연속입력 서버동기화, 종료 30초 전 긴급저장, revision 기반 마지막 수정 보존을 모두 포함합니다.
+
+## v1.6.7 핵심 수정
+- 관리자 강제확정(TIME_EXPIRED/TEACHER_CLOSE) 수신 시 로컬 최종답안을 즉시 삭제하지 않습니다.
+- 서버 제출본과 기기 로컬백업이 다르면 복구 후보로 판정하고 세션 문서에 복구 스냅샷 업로드를 시도합니다.
+- 네트워크가 나중에 복구되거나 페이지를 다시 열어도 남은 로컬백업을 재탐색하여 복구 스냅샷을 다시 전송합니다.
+- 정상 수동 제출/학생 자체 자동제출은 제출 성공 후 48시간 보존용 로컬 아카이브를 남긴 뒤 작업용 백업을 정리합니다.
+- 강제확정 후 서버 제출본과 다른 로컬백업이 있으면 학생 화면에 브라우저 데이터를 지우지 말라는 안내가 표시됩니다.
+
