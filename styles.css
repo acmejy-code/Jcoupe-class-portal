@@ -133,4 +133,4 @@ body.assessment-focus-mode .portal-nav{display:none}
 .student-calendar-empty{grid-column:1/-1;padding:36px 14px;text-align:center;color:#94a3b8;font-size:12px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
 @media(max-width:720px){.student-calendar-head{flex-direction:column}.student-calendar-actions{width:100%;justify-content:flex-start}.student-calendar-note{text-align:left}.student-cal-day{min-height:118px}}
 
-/* v1.6.7 - 연결/저장 안정화는 동작 로직 개선, 기존 응시 UI 유지 */
+/* v1.6.8 - 연결/저장 안정화는 동작 로직 개선, 기존 응시 UI 유지 */
