@@ -1,0 +1,8 @@
+JCOUP 학생 포털 v1.6.8 정적 검증 결과
+
+- 선택한 반의 targetClasses에 포함된 WAITING/OPEN 평가만 표시: 확인
+- 반 변경 시 이전 평가 선택 해제/목록 재렌더: 확인
+- 응시/세션/답안 경로는 assessmentId별 분리 유지: 확인
+- 로컬 백업 key에 assessmentId 포함 유지: 확인
+- 서버 저장/자동제출/복구 로직 v1.6.7 계승: 확인
+- Firestore Rules의 실제 반/targetClasses 검증 유지: 확인
