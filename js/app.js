@@ -1,6 +1,6 @@
-import { firebaseConfig } from "./firebase-config.js?v=1.8.1";
-import { PORTAL_CONFIG } from "./portal-config.js?v=1.8.1";
-import { DRIVE_BRIDGE_CONFIG, isDriveBridgeConfigured } from "./drive-bridge-config.js?v=1.8.1";
+import { firebaseConfig } from "./firebase-config.js?v=1.8.2";
+import { PORTAL_CONFIG } from "./portal-config.js?v=1.8.2";
+import { DRIVE_BRIDGE_CONFIG, isDriveBridgeConfigured } from "./drive-bridge-config.js?v=1.8.2";
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
@@ -56,12 +56,14 @@ let lastFocusEventMs=0;
 let pendingMonitorEvents=[];
 let wasOfflineDuringAttempt=false;
 
-// v1.8.1 수행평가2 · Google Drive 추가자료 연동
+// v1.8.2 정식 통합 · Drive 업로드 안정화 + 교사 PDF 열람 안정화 + 구조화 찬반 입론서
 let activeTwoStagePhase=null; // PHASE2 | MATERIAL | PHASE3
 let twoStageAttempt=null;
 let twoStageContent=null;
 let twoStagePhase2={};
-let twoStagePhase3Essay="";
+let twoStagePhase3Outline={};
+let twoStagePhase3Essay=""; // 구조화 답안을 조합한 호환용 텍스트
+let twoStagePhase3LegacyEssay="";
 let twoStageDirty=false;
 let twoStageSaving=false;
 let twoStageSaveHandle=null;
@@ -516,11 +518,37 @@ function normalizePreviewUrl(raw){
 function closeTwoStageViewer(){
   const el=$("twoStageViewerOverlay");if(el)el.remove();
 }
+function openSafeNewTab_(url){
+  const target=String(url||"").trim();
+  if(!target)return;
+  const w=window.open(target,"_blank","noopener,noreferrer");
+  if(!w){
+    const a=document.createElement("a");a.href=target;a.target="_blank";a.rel="noopener noreferrer";a.style.display="none";
+    document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),0);
+  }
+}
 function openTwoStageUrlViewer(title,url){
-  closeTwoStageViewer();const src=normalizePreviewUrl(url);if(!src)return;
+  closeTwoStageViewer();
+  const originalUrl=String(url||"").trim(),src=normalizePreviewUrl(originalUrl);if(!src)return;
+  const allowExternal=activeTwoStagePhase==="PHASE2";
   const overlay=document.createElement("div");overlay.id="twoStageViewerOverlay";overlay.className="two-stage-viewer-overlay";
-  overlay.innerHTML=`<div class="two-stage-viewer"><div class="two-stage-viewer-head"><b>${esc(title||"자료 보기")}</b><button type="button" id="closeTwoStageViewer">닫기</button></div><iframe src="${esc(src)}" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" referrerpolicy="no-referrer"></iframe></div>`;
-  document.body.appendChild(overlay);$("closeTwoStageViewer").onclick=closeTwoStageViewer;overlay.onclick=e=>{if(e.target===overlay)closeTwoStageViewer();};
+  const sandbox=allowExternal
+    ?"allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-popups-to-escape-sandbox"
+    :"allow-scripts allow-same-origin allow-forms allow-downloads";
+  overlay.innerHTML=`<div class="two-stage-viewer teacher-material-viewer ${allowExternal?"phase2-external":"phase3-locked"}">
+    <div class="two-stage-viewer-head">
+      <div><b>${esc(title||"자료 보기")}</b><small>${allowExternal?"2차시 · 새 탭 열기 허용":"3차시 · 새 탭/외부 이동 제한"}</small></div>
+      <div class="two-stage-viewer-actions">${allowExternal?`<button type="button" id="openTwoStageNewTab">새 탭에서 보기</button>`:""}<button type="button" id="closeTwoStageViewer">닫기</button></div>
+    </div>
+    <div class="two-stage-viewer-frame-wrap">
+      <iframe src="${esc(src)}" sandbox="${sandbox}" referrerpolicy="no-referrer" title="교사 제공 PDF"></iframe>
+      ${allowExternal?"":`<div class="drive-popout-guard" title="3차시에는 새 탭 열기가 제한됩니다." aria-hidden="true"></div>`}
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  $("closeTwoStageViewer").onclick=closeTwoStageViewer;
+  if(allowExternal&&$("openTwoStageNewTab"))$("openTwoStageNewTab").onclick=()=>openSafeNewTab_(originalUrl);
+  overlay.onclick=e=>{if(e.target===overlay)closeTwoStageViewer();};
 }
 function assertDriveBridgeConfigured(){
   if(!isDriveBridgeConfigured())throw new Error("추가자료 Drive 연동 주소가 아직 설정되지 않았습니다. 선생님께 알려 주세요.");
@@ -541,7 +569,10 @@ async function driveBridgeRequest_(action,extra={},timeoutMs=65000){
     const iframe=document.createElement("iframe");iframe.name=`jcoupDriveBridge_${requestId.replace(/[^A-Za-z0-9_]/g,"")}`;iframe.style.display="none";document.body.appendChild(iframe);
     let done=false;const cleanup=()=>{window.removeEventListener("message",onMessage);try{iframe.remove();}catch{}};
     const timer=setTimeout(()=>{if(done)return;done=true;cleanup();reject(new Error("Drive 서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."));},timeoutMs);
-    const onMessage=e=>{const d=e.data;if(done||e.source!==iframe.contentWindow||!d||d.source!=="JCOUPE_DRIVE_BRIDGE"||String(d.requestId)!==String(requestId))return;done=true;clearTimeout(timer);cleanup();if(d.ok)resolve(d);else reject(new Error(d.error||"Drive 처리에 실패했습니다."));};
+    // Apps Script HtmlService는 Google의 중간 프레임을 거칠 수 있어 e.source가
+    // 우리가 만든 iframe.contentWindow와 정확히 일치하지 않을 수 있습니다.
+    // 보안상 예측 불가능한 requestId + 고정 source 값을 함께 검증합니다.
+    const onMessage=e=>{const d=e.data;if(done||!d||d.source!=="JCOUPE_DRIVE_BRIDGE"||String(d.requestId)!==String(requestId))return;done=true;clearTimeout(timer);cleanup();if(d.ok)resolve(d);else reject(new Error(d.error||"Drive 처리에 실패했습니다."));};
     window.addEventListener("message",onMessage);
     submitBridgeForm_(iframe,{action,requestId,...base,...extra});
   });
@@ -550,6 +581,29 @@ function arrayBufferToBase64_(buffer){
   const bytes=new Uint8Array(buffer),chunk=0x8000;let binary="";
   for(let i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length)));
   return btoa(binary);
+}
+
+async function fetchTwoStageExtraMaterials_(){
+  if(!fb||!selectedAssessmentId||!twoStageAttempt?.studentId)return [];
+  const ref=fb.fsMod.doc(fb.db,"publicCourses",projectId,"assessments",selectedAssessmentId,"attempts",String(twoStageAttempt.studentId));
+  const snap=await fb.fsMod.getDoc(ref);
+  if(!snap.exists())return [];
+  const data=snap.data()||{};
+  const materials=Array.isArray(data.extraMaterials)?data.extraMaterials:[];
+  twoStageAttempt={...twoStageAttempt,...data,extraMaterials:materials};
+  return materials;
+}
+async function waitForExtraMaterialState_(materialId,shouldExist=true,timeoutMs=18000){
+  const deadline=Date.now()+timeoutMs;
+  while(Date.now()<deadline){
+    try{
+      const materials=await fetchTwoStageExtraMaterials_();
+      const exists=materials.some(x=>String(x?.id)===String(materialId));
+      if(exists===shouldExist)return {ok:true,reconciled:true,extraMaterials:materials};
+    }catch(err){console.warn("추가자료 서버 확인 재시도",err);}
+    await new Promise(r=>setTimeout(r,1200));
+  }
+  return null;
 }
 async function openTwoStageDriveViewer(file){
   if(!file?.id)return;
@@ -565,6 +619,62 @@ async function openTwoStageDriveViewer(file){
 }
 function phase2RequiredKeys(){return ["topicId","propositionId","selectionReason","passageConnection","conflictAnalysis","propositionChoiceReason","proGround","conGround","stanceReason"];}
 function twoStageIdentity(){return `<div class="assessment-identity"><b>${esc(twoStageAttempt?.studentId||"")}</b> ${esc(twoStageAttempt?.studentName||"")} · ${esc(twoStageAttempt?.className||selectedClass)}반</div>`;}
+
+const PHASE3_OUTLINE_FIELDS=[
+  ["proClaim","찬성 측 주장"],
+  ["proGround1","찬성 측 첫째 근거"],["proSource1","찬성 측 첫째 근거 자료·출처"],["proEvidence1","찬성 측 첫째 근거의 객관적 자료·사례 및 설명"],
+  ["proGround2","찬성 측 둘째 근거"],["proSource2","찬성 측 둘째 근거 자료·출처"],["proEvidence2","찬성 측 둘째 근거의 객관적 자료·사례 및 설명"],
+  ["proCounter","반대 측에서 제기할 예상 반론 또는 교차조사 질문"],["proRebuttal","예상 반론에 대한 찬성 측 반박"],["proSummary","찬성 측 내용 요약·정리"],
+  ["conClaim","반대 측 주장"],
+  ["conGround1","반대 측 첫째 근거"],["conSource1","반대 측 첫째 근거 자료·출처"],["conEvidence1","반대 측 첫째 근거의 객관적 자료·사례 및 설명"],
+  ["conGround2","반대 측 둘째 근거"],["conSource2","반대 측 둘째 근거 자료·출처"],["conEvidence2","반대 측 둘째 근거의 객관적 자료·사례 및 설명"],
+  ["conCounter","찬성 측에서 제기할 예상 반론 또는 교차조사 질문"],["conRebuttal","예상 반론에 대한 반대 측 반박"],["conSummary","반대 측 내용 요약·정리"]
+];
+function emptyPhase3Outline(){return Object.fromEntries(PHASE3_OUTLINE_FIELDS.map(([k])=>[k,""]));}
+function normalizePhase3Outline(value){const out=emptyPhase3Outline(),src=value&&typeof value==="object"?value:{};PHASE3_OUTLINE_FIELDS.forEach(([k])=>out[k]=String(src[k]??""));return out;}
+function phase3OutlineHasContent(outline=twoStagePhase3Outline){return PHASE3_OUTLINE_FIELDS.some(([k])=>String(outline?.[k]||"").trim());}
+function phase3OutlineMissing(outline=twoStagePhase3Outline){return PHASE3_OUTLINE_FIELDS.filter(([k])=>!String(outline?.[k]||"").trim());}
+function phase3OutlineCharCount(outline=twoStagePhase3Outline){return PHASE3_OUTLINE_FIELDS.reduce((n,[k])=>n+String(outline?.[k]||"").length,0);}
+function phase3OutlineFilledCount(outline=twoStagePhase3Outline){return PHASE3_OUTLINE_FIELDS.filter(([k])=>String(outline?.[k]||"").trim()).length;}
+function buildPhase3Essay(outline=twoStagePhase3Outline){
+  const o=normalizePhase3Outline(outline);
+  return [
+    "[찬성 입론]",
+    `1. 주장\n${o.proClaim}`,
+    `2. 첫째 근거\n${o.proGround1}\n- 자료·출처: ${o.proSource1}\n- 객관적 자료·사례 및 설명: ${o.proEvidence1}`,
+    `3. 둘째 근거\n${o.proGround2}\n- 자료·출처: ${o.proSource2}\n- 객관적 자료·사례 및 설명: ${o.proEvidence2}`,
+    `4. 반대 측 예상 반론 또는 교차조사 질문\n${o.proCounter}`,
+    `5. 예상 반론에 대한 찬성 측 반박\n${o.proRebuttal}`,
+    `6. 찬성 측 내용 요약·정리\n${o.proSummary}`,
+    "",
+    "[반대 입론]",
+    `1. 주장\n${o.conClaim}`,
+    `2. 첫째 근거\n${o.conGround1}\n- 자료·출처: ${o.conSource1}\n- 객관적 자료·사례 및 설명: ${o.conEvidence1}`,
+    `3. 둘째 근거\n${o.conGround2}\n- 자료·출처: ${o.conSource2}\n- 객관적 자료·사례 및 설명: ${o.conEvidence2}`,
+    `4. 찬성 측 예상 반론 또는 교차조사 질문\n${o.conCounter}`,
+    `5. 예상 반론에 대한 반대 측 반박\n${o.conRebuttal}`,
+    `6. 반대 측 내용 요약·정리\n${o.conSummary}`
+  ].join("\n\n");
+}
+function phase3SideHtml(side,submitted){
+  const pro=side==="pro",prefix=pro?"pro":"con",sideLabel=pro?"찬성":"반대",oppLabel=pro?"반대":"찬성",sideClass=pro?"pro":"con",o=twoStagePhase3Outline,dis=submitted?"disabled":"";
+  const txt=(key,placeholder,extra="")=>`<textarea data-phase3-key="${key}" data-two-stage-final="1" ${dis} placeholder="${esc(placeholder)}" ${extra}>${esc(o[key]||"")}</textarea>`;
+  const inp=(key,placeholder)=>`<input type="text" data-phase3-key="${key}" data-two-stage-final="1" ${dis} placeholder="${esc(placeholder)}" value="${esc(o[key]||"")}">`;
+  return `<section class="phase3-side ${sideClass}"><div class="phase3-side-head"><div class="phase3-side-title">${sideLabel} 입론</div><span>필수 6개 항목</span></div>
+    <div class="phase3-form-section"><div class="phase3-section-title"><span>1</span>${sideLabel} 측 주장</div><p>논제에 ${sideLabel}하는 입장을 한 문장으로 명확하게 표현하세요.</p>${txt(prefix+"Claim",`${sideLabel} 측 주장을 작성하세요.`)}</div>
+    <div class="phase3-reason-grid">
+      <div class="phase3-form-section"><div class="phase3-section-title"><span>2</span>첫째 근거</div>${txt(prefix+"Ground1",`${sideLabel} 측 주장을 뒷받침하는 첫째 근거`)}<label class="phase3-source-label">근거 자료·출처${inp(prefix+"Source1","원지문 / 교사 보조자료 / 추가자료 등")}</label>${txt(prefix+"Evidence1","위 근거를 입증하는 객관적 자료·수치·사례와 그 의미를 설명하세요.")}</div>
+      <div class="phase3-form-section"><div class="phase3-section-title"><span>3</span>둘째 근거</div>${txt(prefix+"Ground2",`${sideLabel} 측 주장을 뒷받침하는 둘째 근거`)}<label class="phase3-source-label">근거 자료·출처${inp(prefix+"Source2","원지문 / 교사 보조자료 / 추가자료 등")}</label>${txt(prefix+"Evidence2","위 근거를 입증하는 객관적 자료·수치·사례와 그 의미를 설명하세요.")}</div>
+    </div>
+    <div class="phase3-form-section"><div class="phase3-section-title"><span>4</span>${oppLabel} 측에서 제기할 예상 반론 또는 교차조사 질문</div>${txt(prefix+"Counter",`${oppLabel} 측은 ${sideLabel} 측 주장에 어떤 문제를 제기할 수 있는가?`)}</div>
+    <div class="phase3-form-section"><div class="phase3-section-title"><span>5</span>예상 반론에 대한 ${sideLabel} 측 반박</div>${txt(prefix+"Rebuttal",`상대 주장의 한계를 짚고 ${sideLabel} 측 입장을 다시 방어하세요.`)}</div>
+    <div class="phase3-form-section"><div class="phase3-section-title"><span>6</span>${sideLabel} 측 내용 요약·정리</div>${txt(prefix+"Summary",`${sideLabel} 측의 주장과 핵심 근거를 요약하여 전체 내용을 정리하세요.`)}</div>
+  </section>`;
+}
+function updatePhase3ProgressUi(){
+  const el=$("phase3Progress");if(el)el.textContent=`${phase3OutlineFilledCount()}/${PHASE3_OUTLINE_FIELDS.length}칸 작성 · ${phase3OutlineCharCount()}자`;
+}
+
 function pushTwoStageMonitorEvent(type,detail=""){if(activeTwoStagePhase!=="PHASE3"||twoStageAttempt?.phase3Status==="SUBMITTED")return;twoStageMonitorEvents.push({type,at:new Date().toISOString(),detail:String(detail||"").slice(0,120)});if(twoStageMonitorEvents.length>30)twoStageMonitorEvents=twoStageMonitorEvents.slice(-30);twoStageDirty=true;scheduleTwoStageSave();}
 function scheduleTwoStageSave(){
   if(twoStageSaveHandle||!twoStageDirty||!twoStageAttempt||!activeTwoStagePhase||activeTwoStagePhase==="MATERIAL")return;
@@ -578,7 +688,11 @@ function scheduleTwoStageSave(){
   },delay);
 }
 function markTwoStagePhase2Dirty(){twoStageDirty=true;writeTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase2",twoStagePhase2);const st=$("twoStageSaveState");if(st)st.textContent="이 기기에 저장됨 · 서버는 약 5분 간격 백업";scheduleTwoStageSave();}
-function markTwoStagePhase3Dirty(){twoStageDirty=true;writeTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase3",{essay:twoStagePhase3Essay,updatedAt:new Date().toISOString()});const st=$("twoStageSaveState");if(st)st.textContent="이 기기에 저장됨 · 서버는 약 5분 간격 백업";scheduleTwoStageSave();}
+function markTwoStagePhase3Dirty(){
+  twoStageDirty=true;twoStagePhase3Essay=buildPhase3Essay(twoStagePhase3Outline);
+  writeTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase3",{outline:twoStagePhase3Outline,essay:twoStagePhase3Essay,updatedAt:new Date().toISOString()});
+  const st=$("twoStageSaveState");if(st)st.textContent="이 기기에 저장됨 · 서버는 약 5분 간격 백업";updatePhase3ProgressUi();scheduleTwoStageSave();
+}
 async function waitTwoStageSaveIdle(maxMs=8000){
   const started=Date.now();
   while(twoStageSaving&&Date.now()-started<maxMs)await new Promise(r=>setTimeout(r,120));
@@ -606,7 +720,7 @@ async function saveTwoStagePhase2(submit=false){
     if(submit){clearTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase2");renderAssessmentPortal();}return true;
   }catch(err){console.error(err);if(st)st.textContent="서버 저장 지연 · 답안은 이 기기에 보관됨";return false;}finally{twoStageSaving=false;}
 }
-async function saveTwoStagePhase3(submit=false){
+async async function saveTwoStagePhase3(submit=false){
   if(submit&&twoStageSaving)await waitTwoStageSaveIdle();
   if(twoStageSaving||!fb||!twoStageAttempt||activeTwoStagePhase!=="PHASE3")return false;
   if(submit&&twoStageSaveHandle){clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;}
@@ -614,16 +728,17 @@ async function saveTwoStagePhase3(submit=false){
   const st=$("twoStageSaveState");if(st)st.textContent=submit?"최종 제출 중…":"서버 백업 중…";const events=[...twoStageMonitorEvents];
   try{
     const ref=fb.fsMod.doc(fb.db,"publicCourses",projectId,"assessments",selectedAssessmentId,"attempts",twoStageAttempt.studentId);
-    const payload={phase3Essay:twoStagePhase3Essay,phase3Status:submit?"SUBMITTED":"IN_PROGRESS",phase3LastSavedAt:fb.fsMod.serverTimestamp(),lastSeenAt:fb.fsMod.serverTimestamp(),updatedAt:fb.fsMod.serverTimestamp(),...twoStageMonitorPayload()};
+    twoStagePhase3Essay=buildPhase3Essay(twoStagePhase3Outline);
+    const payload={phase3Outline:normalizePhase3Outline(twoStagePhase3Outline),phase3Essay:twoStagePhase3Essay,phase3Status:submit?"SUBMITTED":"IN_PROGRESS",phase3LastSavedAt:fb.fsMod.serverTimestamp(),lastSeenAt:fb.fsMod.serverTimestamp(),updatedAt:fb.fsMod.serverTimestamp(),...twoStageMonitorPayload()};
     if(submit)payload.phase3SubmittedAt=fb.fsMod.serverTimestamp();
-    await assessmentOpWithRetry(submit?"3차시 최종 제출":"3차시 서버 백업",()=>fb.fsMod.setDoc(ref,payload,{merge:true}),{tries:2,timeoutMs:8000});twoStageMonitorEvents.splice(0,events.length);twoStageAttempt={...twoStageAttempt,phase3Status:payload.phase3Status,phase3Essay:twoStagePhase3Essay};twoStageLastServerSaveMs=Date.now();twoStageDirty=false;if(twoStageSaveHandle)clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;
+    await assessmentOpWithRetry(submit?"3차시 최종 제출":"3차시 서버 백업",()=>fb.fsMod.setDoc(ref,payload,{merge:true}),{tries:2,timeoutMs:8000});twoStageMonitorEvents.splice(0,events.length);twoStageAttempt={...twoStageAttempt,phase3Status:payload.phase3Status,phase3Outline:payload.phase3Outline,phase3Essay:twoStagePhase3Essay};twoStageLastServerSaveMs=Date.now();twoStageDirty=false;if(twoStageSaveHandle)clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;
     if(st)st.textContent=submit?"최종 제출 완료":`서버 백업 완료 ${new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}`;
     if(submit){clearTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase3");renderAssessmentPortal();}return true;
   }catch(err){console.error(err);if(st)st.textContent="서버 저장 지연 · 글은 이 기기에 보관됨";return false;}finally{twoStageSaving=false;}
 }
 function leaveTwoStageAssessment(){
   if(twoStageSaveHandle)clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;if(twoStageHiddenTimer)clearTimeout(twoStageHiddenTimer);twoStageHiddenTimer=null;closeTwoStageViewer();
-  activeTwoStagePhase=null;twoStageAttempt=null;twoStageContent=null;twoStagePhase2={};twoStagePhase3Essay="";twoStageDirty=false;twoStageLastServerSaveMs=0;twoStageSaving=false;twoStageMonitorEvents=[];twoStageReplaceMaterialId=null;setAssessmentFocusMode(false);selectedAssessmentId=null;renderAssessmentPortal();
+  activeTwoStagePhase=null;twoStageAttempt=null;twoStageContent=null;twoStagePhase2={};twoStagePhase3Outline=emptyPhase3Outline();twoStagePhase3Essay="";twoStagePhase3LegacyEssay="";twoStageDirty=false;twoStageLastServerSaveMs=0;twoStageSaving=false;twoStageMonitorEvents=[];twoStageReplaceMaterialId=null;setAssessmentFocusMode(false);selectedAssessmentId=null;renderAssessmentPortal();
 }
 function renderAssessmentPortal(){
   const root=$("assessmentPortalBody");if(!root)return;
@@ -743,7 +858,7 @@ async function enterTwoStageAssessment(e){
     }else if(stage==="MATERIAL_WINDOW"){
       activeTwoStagePhase="MATERIAL";twoStageLastServerSaveMs=0;twoStagePhase2={...(twoStageAttempt.phase2||{})};
     }else if(stage==="PHASE3_OPEN"){
-      activeTwoStagePhase="PHASE3";twoStageLastServerSaveMs=timestampMs(twoStageAttempt.phase3LastSavedAt)||Date.now();twoStagePhase2={...(twoStageAttempt.phase2||{})};const local=readTwoStageLocal(a.id,studentId,"phase3",{});twoStagePhase3Essay=twoStageAttempt.phase3Status==="SUBMITTED"?String(twoStageAttempt.phase3Essay||""):String(local.essay??twoStageAttempt.phase3Essay??"");twoStageDirty=Boolean(local.essay)&&twoStageAttempt.phase3Status!=="SUBMITTED";
+      activeTwoStagePhase="PHASE3";twoStageLastServerSaveMs=timestampMs(twoStageAttempt.phase3LastSavedAt)||Date.now();twoStagePhase2={...(twoStageAttempt.phase2||{})};const local=readTwoStageLocal(a.id,studentId,"phase3",{});const serverOutline=normalizePhase3Outline(twoStageAttempt.phase3Outline||{});twoStagePhase3Outline=twoStageAttempt.phase3Status==="SUBMITTED"?serverOutline:normalizePhase3Outline(local.outline??serverOutline);twoStagePhase3LegacyEssay=String(twoStageAttempt.phase3Essay||local.essay||"");twoStagePhase3Essay=phase3OutlineHasContent(twoStagePhase3Outline)?buildPhase3Essay(twoStagePhase3Outline):twoStagePhase3LegacyEssay;twoStageDirty=Boolean(local.outline&&phase3OutlineHasContent(local.outline))&&twoStageAttempt.phase3Status!=="SUBMITTED";
       if(twoStageAttempt.phase3Status!=="SUBMITTED"&&twoStageAttempt.phase3Status!=="IN_PROGRESS"){
         await assessmentOpWithRetry("3차시 시작 기록",()=>fb.fsMod.setDoc(attemptRef,{phase3Status:"IN_PROGRESS",phase3StartedAt:fb.fsMod.serverTimestamp(),lastSeenAt:fb.fsMod.serverTimestamp(),updatedAt:fb.fsMod.serverTimestamp()},{merge:true}));twoStageAttempt.phase3Status="IN_PROGRESS";
       }
@@ -767,7 +882,7 @@ function renderTwoStagePhase2(root,a){
 }
 function renderTwoStageMaterial(root,a){
   const topic=twoStageTopic(),files=Array.isArray(twoStageAttempt.extraMaterials)?twoStageAttempt.extraMaterials:[],max=Number(twoStageContent?.extraMaterialMaxFiles??a.extraMaterialMaxFiles??3),maxMb=Math.round(Number(twoStageContent?.extraMaterialMaxBytes||5*1024*1024)/1024/1024),atLimit=files.length>=max;
-  root.innerHTML=`<div class="two-stage-material-page"><button class="back-link" id="leaveTwoStageBtn">← 포털로 돌아가기</button><div class="assessment-login-title"><span class="assessment-open-badge">추가자료 사전등록</span><h3>${esc(a.title)}</h3><p>2차시에서 선택한 논제에 사용할 추가자료가 있는 학생만 등록하세요. 교사 제공 자료만으로도 수행평가를 완료할 수 있습니다.</p></div>${twoStageIdentity()}<section class="two-stage-block selected-proposition"><h4>선택 논제</h4><p>${esc(twoStagePhase2.propositionText||twoStageProposition()?.text||"")}</p></section><section class="two-stage-block"><h4>추가자료 등록</h4><div class="template-download-box"><a class="action-btn secondary" href="./assets/추가자료_등록서식.docx" download>추가자료 등록 서식(DOCX)</a><span>서식에 <b>제목 · 출처 · 본문</b>을 작성한 뒤 PDF로 저장하여 올리세요.</span></div><div class="pdf-help"><b>DOCX → PDF</b><span>Word: 파일 → 다른 이름으로 저장 → PDF</span><span>한글: 파일 → PDF로 저장하기</span><span>Google Docs: 파일 → 다운로드 → PDF 문서(.pdf)</span></div><input id="extraMaterialFileInput" class="sr-only-file" type="file" accept="application/pdf,.pdf"><button type="button" class="pdf-upload-box ${atLimit?"disabled":""}" id="extraMaterialAddBtn" ${atLimit?"disabled":""}><b>${atLimit?"등록 한도 도달":"PDF 선택"}</b><span>최대 ${max}개 · 파일당 ${maxMb}MB 이하${atLimit?" · 기존 파일은 교체 가능":""}</span></button><div id="extraUploadState" class="save-state"></div><div class="extra-material-list">${files.length?files.map((f,i)=>`<article><div><b>${esc(f.name||`추가자료 ${i+1}.pdf`)}</b><small>${Math.max(1,Math.round(Number(f.size||0)/1024))}KB</small></div><div><button type="button" class="action-btn secondary" data-extra-view="${esc(f.id)}">보기</button><button type="button" class="action-btn secondary" data-extra-replace="${esc(f.id)}">교체</button><button type="button" class="action-btn danger-lite" data-extra-delete="${esc(f.id)}">삭제</button></div></article>`).join(""):`<div class="materials-empty compact"><b>등록된 추가자료가 없습니다.</b><span>추가자료가 필요하지 않다면 아무것도 올리지 않아도 됩니다.</span></div>`}</div><p class="small muted">3차시 시작 버튼을 선생님이 누르는 순간 등록 자료가 잠기며 이후 추가·교체·삭제할 수 없습니다.</p></section></div>`;
+  root.innerHTML=`<div class="two-stage-material-page"><button class="back-link" id="leaveTwoStageBtn">← 포털로 돌아가기</button><div class="assessment-login-title"><span class="assessment-open-badge">추가자료 사전등록</span><h3>${esc(a.title)}</h3><p>2차시에서 선택한 논제에 사용할 추가자료가 있는 학생만 등록하세요. 교사 제공 자료만으로도 수행평가를 완료할 수 있습니다.</p></div>${twoStageIdentity()}<section class="two-stage-block selected-proposition"><h4>선택 논제</h4><p>${esc(twoStagePhase2.propositionText||twoStageProposition()?.text||"")}</p></section><section class="two-stage-block"><h4>추가자료 등록</h4><div class="template-download-box"><a class="action-btn secondary" href="./assets/material-registration-template.docx" download>추가자료 등록 서식(DOCX)</a><span>서식에 <b>제목 · 출처 · 본문</b>을 작성한 뒤 PDF로 저장하여 올리세요.</span></div><div class="pdf-help"><b>DOCX → PDF</b><span>Word: 파일 → 다른 이름으로 저장 → PDF</span><span>한글: 파일 → PDF로 저장하기</span><span>Google Docs: 파일 → 다운로드 → PDF 문서(.pdf)</span></div><input id="extraMaterialFileInput" class="sr-only-file" type="file" accept="application/pdf,.pdf"><button type="button" class="pdf-upload-box ${atLimit?"disabled":""}" id="extraMaterialAddBtn" ${atLimit?"disabled":""}><b>${atLimit?"등록 한도 도달":"PDF 선택"}</b><span>최대 ${max}개 · 파일당 ${maxMb}MB 이하${atLimit?" · 기존 파일은 교체 가능":""}</span></button><div id="extraUploadState" class="save-state"></div><div class="extra-material-list">${files.length?files.map((f,i)=>`<article><div><b>${esc(f.name||`추가자료 ${i+1}.pdf`)}</b><small>${Math.max(1,Math.round(Number(f.size||0)/1024))}KB</small></div><div><button type="button" class="action-btn secondary" data-extra-view="${esc(f.id)}">보기</button><button type="button" class="action-btn secondary" data-extra-replace="${esc(f.id)}">교체</button><button type="button" class="action-btn danger-lite" data-extra-delete="${esc(f.id)}">삭제</button></div></article>`).join(""):`<div class="materials-empty compact"><b>등록된 추가자료가 없습니다.</b><span>추가자료가 필요하지 않다면 아무것도 올리지 않아도 됩니다.</span></div>`}</div><p class="small muted">3차시 시작 버튼을 선생님이 누르는 순간 등록 자료가 잠기며 이후 추가·교체·삭제할 수 없습니다.</p></section></div>`;
   $("leaveTwoStageBtn").onclick=leaveTwoStageAssessment;const input=$("extraMaterialFileInput"),addBtn=$("extraMaterialAddBtn");
   if(addBtn)addBtn.onclick=()=>{if(atLimit)return;twoStageReplaceMaterialId=null;input?.click();};
   if(input)input.onchange=e=>{const f=e.target.files?.[0];e.target.value="";const replaceId=twoStageReplaceMaterialId;twoStageReplaceMaterialId=null;if(f)uploadExtraMaterialPdf(f,replaceId);};
@@ -784,24 +899,62 @@ async function uploadExtraMaterialPdf(file,replaceId=null){
   try{
     if(state)state.textContent="PDF를 선생님 Drive에 업로드 중…";
     const fileBase64=arrayBufferToBase64_(await file.arrayBuffer());
-    const result=await driveBridgeRequest_("upload",{materialId:id,fileName:file.name,fileSize:file.size,fileBase64},90000);
-    twoStageAttempt.extraMaterials=Array.isArray(result.extraMaterials)?result.extraMaterials:files;
+    // 완료 메시지와 Firestore 실제 등록 확인을 동시에 기다립니다.
+    // GAS 응답 메시지가 브라우저에서 유실되어도 서버 등록이 확인되면 성공 처리합니다.
+    const bridgeWork=driveBridgeRequest_("upload",{materialId:id,fileName:file.name,fileSize:file.size,fileBase64},60000)
+      .then(result=>({kind:"bridge",ok:true,result}))
+      .catch(error=>({kind:"bridge",ok:false,error}));
+    const verifyWork=waitForExtraMaterialState_(id,true,18000).then(result=>({kind:"verify",result}));
+    let first=await Promise.race([bridgeWork,verifyWork]);
+    let result=null;
+    if(first?.kind==="verify"&&first.result){
+      result=first.result;
+    }else if(first?.kind==="bridge"&&first.ok){
+      result=first.result;
+    }else if(first?.kind==="bridge"&&!first.ok){
+      const reconciled=await waitForExtraMaterialState_(id,true,4500);
+      if(reconciled)result=reconciled;else throw first.error;
+    }else{
+      if(state)state.textContent="Drive 저장 결과 확인 중…";
+      const later=await bridgeWork;
+      if(later.ok)result=later.result;
+      else{const reconciled=await waitForExtraMaterialState_(id,true,4500);if(reconciled)result=reconciled;else throw later.error;}
+    }
+    twoStageAttempt.extraMaterials=Array.isArray(result?.extraMaterials)?result.extraMaterials:await fetchTwoStageExtraMaterials_();
     if(state)state.textContent="Drive 등록 완료";renderTwoStageMaterial($("assessmentPortalBody"),a);
-  }catch(err){console.error(err);if(state)state.textContent="업로드 실패";alert(`PDF 업로드에 실패했습니다. ${err.message||err}`);}
+  }catch(err){
+    console.error(err);
+    // 마지막으로 실제 서버 상태를 한 번 더 확인해 성공했는데 실패로 표시되는 일을 막습니다.
+    try{const reconciled=await waitForExtraMaterialState_(id,true,3000);if(reconciled){twoStageAttempt.extraMaterials=reconciled.extraMaterials;if(state)state.textContent="Drive 등록 완료";renderTwoStageMaterial($("assessmentPortalBody"),a);return;}}catch{}
+    if(state)state.textContent="업로드 실패";alert(`PDF 업로드에 실패했습니다. ${err.message||err}`);
+  }
 }
 async function deleteExtraMaterialPdf(id){
   const a=assessmentById(selectedAssessmentId);if(selectedClassStage(a)!=="MATERIAL_WINDOW"){alert("추가자료 등록기간이 종료되었습니다.");return;}const files=Array.isArray(twoStageAttempt.extraMaterials)?[...twoStageAttempt.extraMaterials]:[],target=files.find(f=>String(f.id)===String(id));if(!target||!confirm(`「${target.name}」을 삭제할까요?`))return;
-  try{const result=await driveBridgeRequest_("delete",{materialId:id},45000);twoStageAttempt.extraMaterials=Array.isArray(result.extraMaterials)?result.extraMaterials:files.filter(f=>String(f.id)!==String(id));renderTwoStageMaterial($("assessmentPortalBody"),a);}catch(err){alert(`삭제 실패: ${err.message||err}`);}
+  try{
+    const bridgeWork=driveBridgeRequest_("delete",{materialId:id},45000).then(result=>({ok:true,result})).catch(error=>({ok:false,error}));
+    const verifyWork=waitForExtraMaterialState_(id,false,15000);
+    const first=await Promise.race([bridgeWork,verifyWork]);
+    let result=null;
+    if(first&&first.reconciled)result=first;
+    else if(first&&first.ok)result=first.result;
+    else if(first&&first.ok===false){const reconciled=await waitForExtraMaterialState_(id,false,3500);if(reconciled)result=reconciled;else throw first.error;}
+    else{const later=await bridgeWork;if(later.ok)result=later.result;else{const reconciled=await waitForExtraMaterialState_(id,false,3500);if(reconciled)result=reconciled;else throw later.error;}}
+    twoStageAttempt.extraMaterials=Array.isArray(result?.extraMaterials)?result.extraMaterials:files.filter(f=>String(f.id)!==String(id));
+    renderTwoStageMaterial($("assessmentPortalBody"),a);
+  }catch(err){alert(`삭제 실패: ${err.message||err}`);}
 }
 function renderPhase2Review(){
   const p=twoStagePhase2;return `<div class="phase2-review"><div><b>선택 지문</b><span>${esc(p.topicTitle||"")}</span></div><div><b>선택 논제</b><span>${esc(p.propositionText||"")}</span></div><div><b>지문 선택 이유</b><span>${esc(p.selectionReason||"")}</span></div><div><b>원지문 연결</b><span>${esc(p.passageConnection||"")}</span></div><div><b>핵심 쟁점</b><span>${esc(p.conflictAnalysis||"")}</span></div><div><b>논제 선택 이유</b><span>${esc(p.propositionChoiceReason||"")}</span></div><div><b>찬성 근거</b><span>${esc(p.proGround||"")}</span></div><div><b>반대 근거</b><span>${esc(p.conGround||"")}</span></div><div><b>나의 입장</b><span>${esc(p.stanceReason||"")}</span></div></div>`;
 }
 function renderTwoStagePhase3(root,a){
   const submitted=twoStageAttempt.phase3Status==="SUBMITTED",topic=twoStageTopic(),files=Array.isArray(twoStageAttempt.extraMaterials)?twoStageAttempt.extraMaterials:[];
-  root.innerHTML=`<div class="assessment-exam two-stage-phase3"><div class="assessment-exam-head"><div><span class="assessment-open-badge">${submitted?"최종 제출 완료":"3차시 · 최종 입론서 작성"}</span><h3>${esc(a.title)}</h3><div class="assessment-instructions">이 화면에 표시된 교사 제공 자료, 2차시 기록, 사전 등록 PDF만 확인하며 작성하세요.</div></div><div class="save-state" id="twoStageSaveState">${submitted?"제출 완료":"이 기기에 즉시 저장"}</div></div>${twoStageIdentity()}<div class="two-stage-phase3-layout"><aside class="two-stage-reference-panel"><section><h4>선택 논제</h4><p class="selected-proposition-text">${esc(twoStagePhase2.propositionText||"")}</p></section><section><h4>2차시 사고 기록</h4>${renderPhase2Review()}</section><section><h4>교사 제공 자료</h4>${renderTeacherMaterialButtons(topic)}</section><section><h4>사전 등록 추가자료</h4>${files.length?files.map((f,i)=>`<button type="button" class="action-btn secondary full-btn" data-extra-view="${esc(f.id)}">📄 ${esc(f.name||`추가자료 ${i+1}.pdf`)}</button>`).join(""):`<span class="small muted">등록한 추가자료 없음</span>`}</section></aside><main class="two-stage-writing-panel"><label><div class="writing-title"><b>최종 토론 입론서</b><span id="phase3CharCount">${twoStagePhase3Essay.length}자</span></div><textarea id="phase3Essay" data-two-stage-final="1" ${submitted?"disabled":""} placeholder="논제와 입장을 분명히 밝히고, 주장·이유·근거, 예상 반론과 반박, 결론이 연결되도록 작성하세요.">${esc(twoStagePhase3Essay)}</textarea></label>${submitted?`<div class="submitted-box"><b>최종 입론서가 제출되었습니다.</b><span>제출 후에는 수정할 수 없습니다.</span><button class="action-btn secondary" id="leaveTwoStageBtn">포털로 돌아가기</button></div>`:`<div class="assessment-submit-bar"><span>화면이 3초 이상 숨겨진 경우와 답안칸의 실제 붙여넣기는 감독 참고 기록으로 남습니다. 별도 heartbeat는 사용하지 않습니다.</span><button class="action-btn primary" id="submitTwoStagePhase3Btn">최종 제출</button></div>`}</main></div></div>`;
+  const legacyNotice=twoStagePhase3LegacyEssay&&!phase3OutlineHasContent(twoStagePhase3Outline)?`<div class="phase3-legacy-notice"><b>이전 버전의 단일 답안이 저장되어 있습니다.</b><span>${submitted?"기존 제출 답안을 아래에서 확인할 수 있습니다.":"기존 내용은 참고만 하고, 새 구조의 찬성·반대 항목을 모두 작성해 주세요."}</span><details><summary>이전 단일 답안 보기</summary><pre>${esc(twoStagePhase3LegacyEssay)}</pre></details></div>`:"";
+  root.innerHTML=`<div class="assessment-exam two-stage-phase3"><div class="assessment-exam-head"><div><span class="assessment-open-badge">${submitted?"최종 제출 완료":"3차시 · 찬성·반대 토론 입론서 작성"}</span><h3>${esc(a.title)}</h3><div class="assessment-instructions">같은 논제에 대해 찬성과 반대 양쪽을 모두 작성합니다. 이 화면에 표시된 교사 제공 자료, 2차시 기록, 사전 등록 PDF만 활용하세요.</div></div><div><div class="save-state" id="twoStageSaveState">${submitted?"제출 완료":"이 기기에 즉시 저장"}</div><div class="phase3-progress" id="phase3Progress">${phase3OutlineFilledCount()}/${PHASE3_OUTLINE_FIELDS.length}칸 작성 · ${phase3OutlineCharCount()}자</div></div></div>${twoStageIdentity()}<div class="two-stage-phase3-layout"><aside class="two-stage-reference-panel"><section><h4>선택 논제</h4><p class="selected-proposition-text">${esc(twoStagePhase2.propositionText||"")}</p></section><section><h4>2차시 사고 기록</h4>${renderPhase2Review()}</section><section><h4>교사 제공 자료</h4>${renderTeacherMaterialButtons(topic)}</section><section><h4>사전 등록 추가자료</h4>${files.length?files.map((f,i)=>`<button type="button" class="action-btn secondary full-btn" data-extra-view="${esc(f.id)}">📄 ${esc(f.name||`추가자료 ${i+1}.pdf`)}</button>`).join(""):`<span class="small muted">등록한 추가자료 없음</span>`}</section></aside><main class="two-stage-writing-panel phase3-structured-panel"><div class="phase3-form-guide"><b>작성 방식</b><span>찬성·반대 각각 주장 → 근거 2개와 객관적 자료·사례 → 예상 반론/교차조사 → 반박 → 내용 요약·정리 순서로 작성합니다.</span></div>${legacyNotice}${phase3SideHtml("pro",submitted)}${phase3SideHtml("con",submitted)}${submitted?`<div class="submitted-box"><b>찬성·반대 입론서가 제출되었습니다.</b><span>제출 후에는 수정할 수 없습니다.</span><button class="action-btn secondary" id="leaveTwoStageBtn">포털로 돌아가기</button></div>`:`<div class="assessment-submit-bar"><span>찬성·반대의 모든 필수 입력칸을 작성해야 제출할 수 있습니다. 화면이 3초 이상 숨겨진 경우와 입력칸의 실제 붙여넣기는 감독 참고 기록으로 남습니다.</span><button class="action-btn primary" id="submitTwoStagePhase3Btn">최종 제출</button></div>`}</main></div></div>`;
   bindTeacherMaterialButtons(root,topic);root.querySelectorAll("[data-extra-view]").forEach(b=>b.onclick=()=>openTwoStageDriveViewer(files.find(f=>String(f.id)===String(b.dataset.extraView))));
-  const ta=$("phase3Essay");if(ta&&!submitted)ta.oninput=()=>{twoStagePhase3Essay=ta.value;$("phase3CharCount").textContent=`${ta.value.length}자`;markTwoStagePhase3Dirty();};
-  if(submitted)$("leaveTwoStageBtn").onclick=leaveTwoStageAssessment;else $("submitTwoStagePhase3Btn").onclick=async()=>{if(!String(twoStagePhase3Essay||"").trim()){alert("입론서를 작성한 뒤 제출해 주세요.");return;}if(!confirm("최종 입론서를 제출할까요? 제출 후에는 수정할 수 없습니다."))return;await saveTwoStagePhase3(true);};
+  root.querySelectorAll("[data-phase3-key]").forEach(el=>{if(submitted)return;el.oninput=()=>{twoStagePhase3Outline[el.dataset.phase3Key]=el.value;markTwoStagePhase3Dirty();};});
+  updatePhase3ProgressUi();
+  if(submitted)$("leaveTwoStageBtn").onclick=leaveTwoStageAssessment;else $("submitTwoStagePhase3Btn").onclick=async()=>{const missing=phase3OutlineMissing();if(missing.length){const labels=missing.slice(0,6).map(([,label])=>`• ${label}`).join("\n");alert(`찬성·반대의 모든 필수 항목을 작성한 뒤 제출해 주세요.\n\n미작성 ${missing.length}칸${labels?`\n${labels}${missing.length>6?"\n…":""}`:""}`);return;}if(!confirm("찬성·반대 양쪽 입론서를 최종 제출할까요? 제출 후에는 수정할 수 없습니다."))return;await saveTwoStagePhase3(true);};
 }
 function renderTwoStageActive(root){
   const a=assessmentById(selectedAssessmentId);if(!a){leaveTwoStageAssessment();return;}const stage=selectedClassStage(a),expected=twoStagePhaseForStage(stage);
@@ -1293,6 +1446,6 @@ window.addEventListener("online",async()=>{
   const key=`${assessmentBackupKey(selectedAssessmentId,activeAttempt.studentId)}_pendingSubmit`;
   if(localStorage.getItem(key)){const auto=localStorage.getItem(key)==="AUTO";const ok=await submitAssessmentWithRetry(auto,5);if(ok)localStorage.removeItem(key);}await scanAndSyncRecoveryBackups();
 });
-// v1.8.1: 기존 시험형만 60초 heartbeat를 사용합니다. 2단계형은 heartbeat 없이 저빈도 답안 백업만 사용합니다.
+// v1.8.2: 기존 시험형만 60초 heartbeat를 사용합니다. 2단계형은 heartbeat 없이 저빈도 답안 백업만 사용합니다.
 setInterval(()=>{if(activeAttempt&&activeAttempt.status!=="SUBMITTED")sendAssessmentHeartbeat();},60000);
 init();
