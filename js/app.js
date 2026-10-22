@@ -1,6 +1,6 @@
-import { firebaseConfig } from "./firebase-config.js?v=1.8.4";
-import { PORTAL_CONFIG } from "./portal-config.js?v=1.8.4";
-import { DRIVE_BRIDGE_CONFIG, isDriveBridgeConfigured } from "./drive-bridge-config.js?v=1.8.4";
+import { firebaseConfig } from "./firebase-config.js?v=1.8.5";
+import { PORTAL_CONFIG } from "./portal-config.js?v=1.8.5";
+import { DRIVE_BRIDGE_CONFIG, isDriveBridgeConfigured } from "./drive-bridge-config.js?v=1.8.5";
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
@@ -56,7 +56,7 @@ let lastFocusEventMs=0;
 let pendingMonitorEvents=[];
 let wasOfflineDuringAttempt=false;
 
-// v1.8.4 연결 복구 · Drive 업로드 안정화 + 교사 PDF 열람 안정화 + 구조화 찬반 입론서
+// v1.8.5 연결 진단 복구 · Drive 업로드 안정화 + 교사 PDF 열람 안정화 + 구조화 찬반 입론서
 let activeTwoStagePhase=null; // PHASE2 | MATERIAL | PHASE3
 let twoStageAttempt=null;
 let twoStageContent=null;
@@ -720,7 +720,7 @@ async function saveTwoStagePhase2(submit=false){
     if(submit){clearTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase2");renderAssessmentPortal();}return true;
   }catch(err){console.error(err);if(st)st.textContent="서버 저장 지연 · 답안은 이 기기에 보관됨";return false;}finally{twoStageSaving=false;}
 }
-async async function saveTwoStagePhase3(submit=false){
+async function saveTwoStagePhase3(submit=false){
   if(submit&&twoStageSaving)await waitTwoStageSaveIdle();
   if(twoStageSaving||!fb||!twoStageAttempt||activeTwoStagePhase!=="PHASE3")return false;
   if(submit&&twoStageSaveHandle){clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;}
