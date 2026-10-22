@@ -1,6 +1,6 @@
-import { firebaseConfig } from "./firebase-config.js?v=1.8.2";
-import { PORTAL_CONFIG } from "./portal-config.js?v=1.8.2";
-import { DRIVE_BRIDGE_CONFIG, isDriveBridgeConfigured } from "./drive-bridge-config.js?v=1.8.2";
+import { firebaseConfig } from "./firebase-config.js?v=1.8.4";
+import { PORTAL_CONFIG } from "./portal-config.js?v=1.8.4";
+import { DRIVE_BRIDGE_CONFIG, isDriveBridgeConfigured } from "./drive-bridge-config.js?v=1.8.4";
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
@@ -56,7 +56,7 @@ let lastFocusEventMs=0;
 let pendingMonitorEvents=[];
 let wasOfflineDuringAttempt=false;
 
-// v1.8.2 정식 통합 · Drive 업로드 안정화 + 교사 PDF 열람 안정화 + 구조화 찬반 입론서
+// v1.8.4 연결 복구 · Drive 업로드 안정화 + 교사 PDF 열람 안정화 + 구조화 찬반 입론서
 let activeTwoStagePhase=null; // PHASE2 | MATERIAL | PHASE3
 let twoStageAttempt=null;
 let twoStageContent=null;
