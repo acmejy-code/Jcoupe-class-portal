@@ -1,5 +1,6 @@
-import { firebaseConfig } from "./firebase-config.js?v=1.7.0";
-import { PORTAL_CONFIG } from "./portal-config.js?v=1.7.0";
+import { firebaseConfig } from "./firebase-config.js?v=1.8.1";
+import { PORTAL_CONFIG } from "./portal-config.js?v=1.8.1";
+import { DRIVE_BRIDGE_CONFIG, isDriveBridgeConfigured } from "./drive-bridge-config.js?v=1.8.1";
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
@@ -54,6 +55,23 @@ let assessmentHiddenEventRecorded=false;
 let lastFocusEventMs=0;
 let pendingMonitorEvents=[];
 let wasOfflineDuringAttempt=false;
+
+// v1.8.1 수행평가2 · Google Drive 추가자료 연동
+let activeTwoStagePhase=null; // PHASE2 | MATERIAL | PHASE3
+let twoStageAttempt=null;
+let twoStageContent=null;
+let twoStagePhase2={};
+let twoStagePhase3Essay="";
+let twoStageDirty=false;
+let twoStageSaving=false;
+let twoStageSaveHandle=null;
+let twoStageLastServerSaveMs=0;
+const TWO_STAGE_SERVER_BACKUP_MS=5*60*1000;
+let twoStageMonitorEvents=[];
+let twoStageReplaceMaterialId=null;
+let twoStageHiddenSince=0;
+let twoStageHiddenTimer=null;
+let twoStageHiddenRecorded=false;
 
 function setStatus(text,type=""){
   $("syncStatus").textContent=text;
@@ -351,11 +369,11 @@ function assessmentTargetsSelectedClass(a){
 }
 function openAssessments(){
   if(adminPreviewData?.assessment)return [{...adminPreviewData.assessment}];
-  // v1.6.8: 현재 선택한 반의 평가만 노출. 다른 반의 WAITING/OPEN 평가가 남아 있어도
-  // 이 반의 응시 목록/입장 흐름에는 절대 섞이지 않는다.
-  return publicAssessments
-    .filter(a=>["WAITING","OPEN"].includes(a.status)&&assessmentTargetsSelectedClass(a))
-    .sort((a,b)=>String(b.updatedAt?.seconds||b.updatedAt||"").localeCompare(String(a.updatedAt?.seconds||a.updatedAt||"")));
+  return publicAssessments.filter(a=>{
+    if(!assessmentTargetsSelectedClass(a))return false;
+    if(isTwoStageAssessment(a))return ["PHASE2_OPEN","MATERIAL_WINDOW","PHASE3_OPEN"].includes(selectedClassStage(a));
+    return ["WAITING","OPEN"].includes(a.status);
+  }).sort((a,b)=>String(b.updatedAt?.seconds||b.updatedAt||"").localeCompare(String(a.updatedAt?.seconds||a.updatedAt||"")));
 }
 function assessmentById(id){
   if(adminPreviewData?.assessment&&String(adminPreviewData.assessment.id)===String(id))return {...adminPreviewData.assessment};
@@ -477,24 +495,161 @@ function stopAssessmentTimer(){
   if(assessmentTimerHandle)clearInterval(assessmentTimerHandle);
   assessmentTimerHandle=null;
 }
+
+const TWO_STAGE_MODE="ARGUMENT_TWO_STAGE";
+const TWO_STAGE_LABELS={PHASE2_READY:"2차시 준비",PHASE2_OPEN:"2차시 평가",MATERIAL_WINDOW:"추가자료 사전등록",PHASE3_OPEN:"3차시 최종 작성",CLOSED:"완료"};
+function isTwoStageAssessment(a){return a?.mode===TWO_STAGE_MODE;}
+function selectedClassStage(a){return String(a?.classStages?.[selectedClass]?.stage||"PHASE2_READY");}
+function twoStagePhaseForStage(stage){return stage==="PHASE2_OPEN"?"PHASE2":stage==="MATERIAL_WINDOW"?"MATERIAL":stage==="PHASE3_OPEN"?"PHASE3":null;}
+function twoStageLocalKey(assessmentId,studentId,phase){return `jcoup_two_stage_${projectId}_${assessmentId}_${studentId}_${phase}`;}
+function readTwoStageLocal(assessmentId,studentId,phase,fallback){try{return JSON.parse(localStorage.getItem(twoStageLocalKey(assessmentId,studentId,phase))||"")||fallback;}catch{return fallback;}}
+function writeTwoStageLocal(assessmentId,studentId,phase,value){try{localStorage.setItem(twoStageLocalKey(assessmentId,studentId,phase),JSON.stringify(value));}catch{}}
+function clearTwoStageLocal(assessmentId,studentId,phase){try{localStorage.removeItem(twoStageLocalKey(assessmentId,studentId,phase));}catch{}}
+function twoStageTopic(){return (twoStageContent?.topicSets||[]).find(t=>String(t.id)===String(twoStagePhase2.topicId))||null;}
+function twoStageProposition(){const t=twoStageTopic();return (t?.propositions||[]).find(p=>String(p.id)===String(twoStagePhase2.propositionId))||null;}
+function normalizePreviewUrl(raw){
+  const url=String(raw||"").trim();if(!url)return "";
+  const m=url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([-\w]+)/i)||url.match(/[?&]id=([-\w]+)/i);
+  if(m?.[1])return `https://drive.google.com/file/d/${m[1]}/preview`;
+  return url;
+}
+function closeTwoStageViewer(){
+  const el=$("twoStageViewerOverlay");if(el)el.remove();
+}
+function openTwoStageUrlViewer(title,url){
+  closeTwoStageViewer();const src=normalizePreviewUrl(url);if(!src)return;
+  const overlay=document.createElement("div");overlay.id="twoStageViewerOverlay";overlay.className="two-stage-viewer-overlay";
+  overlay.innerHTML=`<div class="two-stage-viewer"><div class="two-stage-viewer-head"><b>${esc(title||"자료 보기")}</b><button type="button" id="closeTwoStageViewer">닫기</button></div><iframe src="${esc(src)}" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" referrerpolicy="no-referrer"></iframe></div>`;
+  document.body.appendChild(overlay);$("closeTwoStageViewer").onclick=closeTwoStageViewer;overlay.onclick=e=>{if(e.target===overlay)closeTwoStageViewer();};
+}
+function assertDriveBridgeConfigured(){
+  if(!isDriveBridgeConfigured())throw new Error("추가자료 Drive 연동 주소가 아직 설정되지 않았습니다. 선생님께 알려 주세요.");
+}
+function appendBridgeField_(form,name,value){const i=document.createElement("input");i.type="hidden";i.name=name;i.value=String(value??"");form.appendChild(i);}
+function submitBridgeForm_(iframe,fields){
+  const form=document.createElement("form");form.method="POST";form.action=DRIVE_BRIDGE_CONFIG.webAppUrl;form.target=iframe.name;form.style.display="none";
+  Object.entries(fields||{}).forEach(([k,v])=>appendBridgeField_(form,k,v));document.body.appendChild(form);form.submit();setTimeout(()=>form.remove(),1000);
+}
+async function getDriveBridgeToken_(){const user=await ensureAssessmentAuth();return user.getIdToken();}
+async function driveBridgeBaseFields_(role="student"){
+  assertDriveBridgeConfigured();
+  return {idToken:await getDriveBridgeToken_(),projectId,assessmentId:selectedAssessmentId,studentId:String(twoStageAttempt?.studentId||""),role};
+}
+async function driveBridgeRequest_(action,extra={},timeoutMs=65000){
+  const base=await driveBridgeBaseFields_("student"),requestId=crypto.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve,reject)=>{
+    const iframe=document.createElement("iframe");iframe.name=`jcoupDriveBridge_${requestId.replace(/[^A-Za-z0-9_]/g,"")}`;iframe.style.display="none";document.body.appendChild(iframe);
+    let done=false;const cleanup=()=>{window.removeEventListener("message",onMessage);try{iframe.remove();}catch{}};
+    const timer=setTimeout(()=>{if(done)return;done=true;cleanup();reject(new Error("Drive 서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."));},timeoutMs);
+    const onMessage=e=>{const d=e.data;if(done||e.source!==iframe.contentWindow||!d||d.source!=="JCOUPE_DRIVE_BRIDGE"||String(d.requestId)!==String(requestId))return;done=true;clearTimeout(timer);cleanup();if(d.ok)resolve(d);else reject(new Error(d.error||"Drive 처리에 실패했습니다."));};
+    window.addEventListener("message",onMessage);
+    submitBridgeForm_(iframe,{action,requestId,...base,...extra});
+  });
+}
+function arrayBufferToBase64_(buffer){
+  const bytes=new Uint8Array(buffer),chunk=0x8000;let binary="";
+  for(let i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length)));
+  return btoa(binary);
+}
+async function openTwoStageDriveViewer(file){
+  if(!file?.id)return;
+  try{
+    const base=await driveBridgeBaseFields_("student");closeTwoStageViewer();
+    const overlay=document.createElement("div");overlay.id="twoStageViewerOverlay";overlay.className="two-stage-viewer-overlay";
+    const frameName=`jcoupDriveView_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    overlay.innerHTML=`<div class="two-stage-viewer canvas-mode"><div class="two-stage-viewer-head"><div><b>${esc(file.name||"추가자료")}</b><small>선생님 Google Drive 원본 · 읽기 전용 · 외부 링크 비활성화</small></div><button type="button" id="closeTwoStageViewer">닫기</button></div><iframe id="twoStageDriveViewerFrame" name="${esc(frameName)}" title="추가자료 PDF" sandbox="allow-scripts allow-same-origin" style="width:100%;height:min(78vh,900px);border:0;background:#eef2f7"></iframe></div>`;
+    document.body.appendChild(overlay);$("closeTwoStageViewer").onclick=closeTwoStageViewer;overlay.onclick=e=>{if(e.target===overlay)closeTwoStageViewer();};
+    const iframe=$("twoStageDriveViewerFrame");iframe.srcdoc='<div style="font-family:sans-serif;padding:30px">PDF를 불러오는 중입니다…</div>';
+    submitBridgeForm_(iframe,{action:"view",requestId:`view-${Date.now()}`,...base,materialId:file.id});
+  }catch(err){alert(`자료를 열 수 없습니다. ${err.message||err}`);}
+}
+function phase2RequiredKeys(){return ["topicId","propositionId","selectionReason","passageConnection","conflictAnalysis","propositionChoiceReason","proGround","conGround","stanceReason"];}
+function twoStageIdentity(){return `<div class="assessment-identity"><b>${esc(twoStageAttempt?.studentId||"")}</b> ${esc(twoStageAttempt?.studentName||"")} · ${esc(twoStageAttempt?.className||selectedClass)}반</div>`;}
+function pushTwoStageMonitorEvent(type,detail=""){if(activeTwoStagePhase!=="PHASE3"||twoStageAttempt?.phase3Status==="SUBMITTED")return;twoStageMonitorEvents.push({type,at:new Date().toISOString(),detail:String(detail||"").slice(0,120)});if(twoStageMonitorEvents.length>30)twoStageMonitorEvents=twoStageMonitorEvents.slice(-30);twoStageDirty=true;scheduleTwoStageSave();}
+function scheduleTwoStageSave(){
+  if(twoStageSaveHandle||!twoStageDirty||!twoStageAttempt||!activeTwoStagePhase||activeTwoStagePhase==="MATERIAL")return;
+  const elapsed=Date.now()-(twoStageLastServerSaveMs||Date.now()),delay=Math.max(1000,TWO_STAGE_SERVER_BACKUP_MS-elapsed);
+  twoStageSaveHandle=setTimeout(async()=>{
+    twoStageSaveHandle=null;
+    if(!twoStageDirty||!twoStageAttempt)return;
+    if(activeTwoStagePhase==="PHASE2")await saveTwoStagePhase2(false);
+    if(activeTwoStagePhase==="PHASE3")await saveTwoStagePhase3(false);
+    if(twoStageDirty)scheduleTwoStageSave();
+  },delay);
+}
+function markTwoStagePhase2Dirty(){twoStageDirty=true;writeTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase2",twoStagePhase2);const st=$("twoStageSaveState");if(st)st.textContent="이 기기에 저장됨 · 서버는 약 5분 간격 백업";scheduleTwoStageSave();}
+function markTwoStagePhase3Dirty(){twoStageDirty=true;writeTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase3",{essay:twoStagePhase3Essay,updatedAt:new Date().toISOString()});const st=$("twoStageSaveState");if(st)st.textContent="이 기기에 저장됨 · 서버는 약 5분 간격 백업";scheduleTwoStageSave();}
+async function waitTwoStageSaveIdle(maxMs=8000){
+  const started=Date.now();
+  while(twoStageSaving&&Date.now()-started<maxMs)await new Promise(r=>setTimeout(r,120));
+  return !twoStageSaving;
+}
+function twoStageMonitorPayload(){
+  if(!twoStageMonitorEvents.length)return {};
+  // 재시도 시 increment 중복 집계를 피하기 위해 이벤트 자체만 arrayUnion으로 저장합니다.
+  // 관리자 화면의 이탈/붙여넣기 횟수는 eventLog에서 계산합니다.
+  return {phase3EventLog:fb.fsMod.arrayUnion(...twoStageMonitorEvents)};
+}
+async function saveTwoStagePhase2(submit=false){
+  if(submit&&twoStageSaving)await waitTwoStageSaveIdle();
+  if(twoStageSaving||!fb||!twoStageAttempt||activeTwoStagePhase!=="PHASE2")return false;
+  if(submit&&twoStageSaveHandle){clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;}
+  twoStageSaving=true;
+  const st=$("twoStageSaveState");if(st)st.textContent=submit?"2차시 제출 중…":"서버 백업 중…";
+  try{
+    const ref=fb.fsMod.doc(fb.db,"publicCourses",projectId,"assessments",selectedAssessmentId,"attempts",twoStageAttempt.studentId),topic=twoStageTopic(),prop=twoStageProposition();
+    const phase2={...twoStagePhase2,topicTitle:topic?.title||twoStagePhase2.topicTitle||"",propositionText:prop?.text||twoStagePhase2.propositionText||""};
+    const payload={phase2,phase2Status:submit?"SUBMITTED":"IN_PROGRESS",phase2LastSavedAt:fb.fsMod.serverTimestamp(),lastSeenAt:fb.fsMod.serverTimestamp(),updatedAt:fb.fsMod.serverTimestamp()};
+    if(submit)payload.phase2SubmittedAt=fb.fsMod.serverTimestamp();
+    await assessmentOpWithRetry(submit?"2차시 최종 제출":"2차시 서버 백업",()=>fb.fsMod.setDoc(ref,payload,{merge:true}),{tries:2,timeoutMs:8000});twoStagePhase2=phase2;twoStageAttempt={...twoStageAttempt,...payload,phase2Status:payload.phase2Status};twoStageLastServerSaveMs=Date.now();twoStageDirty=false;if(twoStageSaveHandle)clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;
+    if(st)st.textContent=submit?"2차시 제출 완료":`서버 백업 완료 ${new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}`;
+    if(submit){clearTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase2");renderAssessmentPortal();}return true;
+  }catch(err){console.error(err);if(st)st.textContent="서버 저장 지연 · 답안은 이 기기에 보관됨";return false;}finally{twoStageSaving=false;}
+}
+async function saveTwoStagePhase3(submit=false){
+  if(submit&&twoStageSaving)await waitTwoStageSaveIdle();
+  if(twoStageSaving||!fb||!twoStageAttempt||activeTwoStagePhase!=="PHASE3")return false;
+  if(submit&&twoStageSaveHandle){clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;}
+  twoStageSaving=true;
+  const st=$("twoStageSaveState");if(st)st.textContent=submit?"최종 제출 중…":"서버 백업 중…";const events=[...twoStageMonitorEvents];
+  try{
+    const ref=fb.fsMod.doc(fb.db,"publicCourses",projectId,"assessments",selectedAssessmentId,"attempts",twoStageAttempt.studentId);
+    const payload={phase3Essay:twoStagePhase3Essay,phase3Status:submit?"SUBMITTED":"IN_PROGRESS",phase3LastSavedAt:fb.fsMod.serverTimestamp(),lastSeenAt:fb.fsMod.serverTimestamp(),updatedAt:fb.fsMod.serverTimestamp(),...twoStageMonitorPayload()};
+    if(submit)payload.phase3SubmittedAt=fb.fsMod.serverTimestamp();
+    await assessmentOpWithRetry(submit?"3차시 최종 제출":"3차시 서버 백업",()=>fb.fsMod.setDoc(ref,payload,{merge:true}),{tries:2,timeoutMs:8000});twoStageMonitorEvents.splice(0,events.length);twoStageAttempt={...twoStageAttempt,phase3Status:payload.phase3Status,phase3Essay:twoStagePhase3Essay};twoStageLastServerSaveMs=Date.now();twoStageDirty=false;if(twoStageSaveHandle)clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;
+    if(st)st.textContent=submit?"최종 제출 완료":`서버 백업 완료 ${new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}`;
+    if(submit){clearTwoStageLocal(selectedAssessmentId,twoStageAttempt.studentId,"phase3");renderAssessmentPortal();}return true;
+  }catch(err){console.error(err);if(st)st.textContent="서버 저장 지연 · 글은 이 기기에 보관됨";return false;}finally{twoStageSaving=false;}
+}
+function leaveTwoStageAssessment(){
+  if(twoStageSaveHandle)clearTimeout(twoStageSaveHandle);twoStageSaveHandle=null;if(twoStageHiddenTimer)clearTimeout(twoStageHiddenTimer);twoStageHiddenTimer=null;closeTwoStageViewer();
+  activeTwoStagePhase=null;twoStageAttempt=null;twoStageContent=null;twoStagePhase2={};twoStagePhase3Essay="";twoStageDirty=false;twoStageLastServerSaveMs=0;twoStageSaving=false;twoStageMonitorEvents=[];twoStageReplaceMaterialId=null;setAssessmentFocusMode(false);selectedAssessmentId=null;renderAssessmentPortal();
+}
 function renderAssessmentPortal(){
   const root=$("assessmentPortalBody");if(!root)return;
   const opens=openAssessments();$("openAssessmentCount").textContent=`${opens.length}개`;
-  setAssessmentFocusMode(!!activeAttempt);
+  setAssessmentFocusMode(!!activeAttempt || (activeTwoStagePhase&&activeTwoStagePhase!=="MATERIAL"));
+  if(activeTwoStagePhase&&twoStageAttempt&&twoStageContent){renderTwoStageActive(root);return;}
   if(activeAttempt?.status==="WAITING"){renderAssessmentWaiting(root);return;}
   if(activeAttempt&&assessmentContent){renderAssessmentExam(root);return;}
   stopAssessmentTimer();
   if(selectedAssessmentId){
     const a=assessmentById(selectedAssessmentId);
-    if(a&&["WAITING","OPEN"].includes(a.status)&&assessmentTargetsSelectedClass(a)){renderAssessmentLogin(root,a);return;}
-    // 반을 바꾸었거나 해당 평가가 종료된 경우 이전 평가 선택을 즉시 해제한다.
+    if(a&&assessmentTargetsSelectedClass(a)){
+      if(isTwoStageAssessment(a)&&["PHASE2_OPEN","MATERIAL_WINDOW","PHASE3_OPEN"].includes(selectedClassStage(a))){renderTwoStageLogin(root,a);return;}
+      if(!isTwoStageAssessment(a)&&["WAITING","OPEN"].includes(a.status)){renderAssessmentLogin(root,a);return;}
+    }
     selectedAssessmentId=null;
   }
   root.innerHTML=opens.length?`<div class="assessment-open-list">${opens.map(a=>{
-    const deadline=a.status==="OPEN"?assessmentDeadlineMs(a,null):0,remaining=deadline?formatRemaining(deadline-correctedNow()):"";
-    const waiting=a.status==="WAITING";
+    if(isTwoStageAssessment(a)){
+      const stage=selectedClassStage(a),label=TWO_STAGE_LABELS[stage]||"수행평가",action=stage==="PHASE2_OPEN"?"2차시 입장":stage==="MATERIAL_WINDOW"?"추가자료 등록":"3차시 입장";
+      const sub=stage==="MATERIAL_WINDOW"?"2차시 제출 학생은 3차시 시작 전까지 추가자료 PDF를 등록·교체·삭제할 수 있습니다.":stage==="PHASE3_OPEN"?"추가자료는 잠겼습니다. 포털에 허용된 자료만 확인하며 최종 입론서를 작성합니다.":"지문과 논제를 선택하고 사고 과정을 기록합니다.";
+      return `<article class="assessment-open-item two-stage-open"><div><span class="assessment-open-badge">${esc(label)}</span><h3>${esc(a.title||"수행평가2")}</h3><p>${esc(sub)}</p><small>${esc(selectedClass)}반 · 2단계 입론서형${stage==="MATERIAL_WINDOW"?" · 응시코드 불필요":" · 응시코드 필요"}</small></div><button class="action-btn primary" data-assessment-enter="${esc(a.id)}">${esc(action)}</button></article>`;
+    }
+    const deadline=a.status==="OPEN"?assessmentDeadlineMs(a,null):0,remaining=deadline?formatRemaining(deadline-correctedNow()):"",waiting=a.status==="WAITING";
     return `<article class="assessment-open-item"><div><span class="assessment-open-badge">${waiting?"입장 대기":"응시 가능"}</span><h3>${esc(a.title||"수행평가")}</h3><p>${esc(a.description||"수행평가 시간에 선생님의 안내에 따라 응시하세요.")}</p><small>${esc((a.targetClasses||[]).join(" · "))}반 · ${Number(a.questionCount||0)}문항${a.durationMinutes?` · 시험 ${Number(a.durationMinutes)+Number(a.timeExtensionMinutes||0)}분`:""}${waiting?" · 문항은 시험 시작 후 공개":remaining?` · 현재 남은 ${remaining}`:""}</small></div><button class="action-btn primary" data-assessment-enter="${esc(a.id)}">${waiting?"대기실 입장":"응시하기"}</button></article>`;
-  }).join("")}</div>`:`<div class="materials-empty"><b>현재 입장 가능한 수행평가가 없습니다.</b><span>선생님이 학생 입장을 열면 이곳에 표시됩니다.</span></div>`;
+  }).join("")}</div>`:`<div class="materials-empty"><b>현재 이용 가능한 수행평가 단계가 없습니다.</b><span>선생님이 해당 반의 2차시·자료등록·3차시 단계를 열면 이곳에 표시됩니다.</span></div>`;
   root.querySelectorAll("[data-assessment-enter]").forEach(b=>b.onclick=()=>{selectedAssessmentId=b.dataset.assessmentEnter;renderAssessmentPortal();});
 }
 function preflightChecks(){
@@ -540,6 +695,118 @@ async function maybeStartWaitingAssessment(){
     renderAssessmentPortal();
     sendAssessmentHeartbeat({force:true});
   }catch(err){console.warn("시험 시작 전환 대기",err);}
+}
+
+
+function renderTwoStageLogin(root,a){
+  const stage=selectedClassStage(a),material=stage==="MATERIAL_WINDOW";
+  const title=stage==="PHASE2_OPEN"?"2차시 평가 입장":material?"추가자료 사전등록":"3차시 평가 입장";
+  const desc=material?"2차시 제출이 완료된 학생만 본인 확인 후 추가자료 PDF를 등록할 수 있습니다. 응시코드는 필요하지 않습니다.":"교실에서 선생님이 안내한 학번·이름·응시코드를 입력하세요.";
+  root.innerHTML=`<div class="assessment-login two-stage-login"><button class="back-link" id="assessmentBackBtn">← 평가 목록</button><div class="assessment-login-title"><span class="assessment-open-badge">${esc(title)}</span><h3>${esc(a.title)}</h3><p>${esc(desc)}</p></div><form id="twoStageLoginForm"><label>학번<input id="assessmentStudentId" inputmode="numeric" autocomplete="off" required maxlength="5" placeholder="예: 20101 / 0101"></label><label>이름<input id="assessmentStudentName" autocomplete="off" required placeholder="본인 이름"></label>${material?"":`<label>응시코드<input id="assessmentCode" autocomplete="off" required placeholder="교실 공통 응시코드"></label>`}<button class="action-btn primary assessment-enter-btn" type="submit" ${navigator.onLine?"":"disabled"}>${material?"추가자료 등록 화면 열기":"입장"}</button><div class="assessment-message" id="assessmentLoginMessage">${navigator.onLine?"":"인터넷 연결을 확인한 뒤 다시 시도하세요."}</div></form></div>`;
+  $("assessmentBackBtn").onclick=()=>{selectedAssessmentId=null;renderAssessmentPortal();};$("twoStageLoginForm").onsubmit=enterTwoStageAssessment;
+}
+async function createTwoStageSession(a,user,inputStudentId,studentName,code,stage){
+  const sessionRef=fb.fsMod.doc(fb.db,"publicCourses",projectId,"assessments",a.id,"sessions",user.uid);let lastErr=null;
+  for(const candidate of studentIdCandidates(inputStudentId)){
+    try{
+      // 보안 규칙이 학번·이름·학급·단계를 이미 검증하므로 성공 직후 session을 다시 읽지 않습니다.
+      // 2단계형의 불필요한 Firestore read를 학생/단계당 1회 줄입니다.
+      await assessmentOpWithRetry("본인 확인 저장",()=>fb.fsMod.setDoc(sessionRef,{authUid:user.uid,studentId:candidate,loginStudentId:inputStudentId,studentName,nameKey:normalizeNameKey(studentName),className:selectedClass,mode:TWO_STAGE_MODE,purpose:stage,phase2Submitted:stage==="MATERIAL_WINDOW",accessCodeProof:stage==="MATERIAL_WINDOW"?"":code,lastSeenAt:fb.fsMod.serverTimestamp(),createdAt:fb.fsMod.serverTimestamp()},{merge:true}));
+      return {sessionRef,studentId:String(candidate)};
+    }catch(err){lastErr=err;}
+  }
+  throw lastErr||new Error("학생 정보를 확인할 수 없습니다.");
+}
+async function enterTwoStageAssessment(e){
+  e.preventDefault();const btn=e.submitter,msg=$("assessmentLoginMessage"),a=assessmentById(selectedAssessmentId),stage=selectedClassStage(a);if(!a||!isTwoStageAssessment(a))return;
+  const inputStudentId=$("assessmentStudentId").value.trim(),studentName=$("assessmentStudentName").value.trim(),code=stage==="MATERIAL_WINDOW"?"":($("assessmentCode")?.value.trim()||"");
+  if(!/^\d{4,5}$/.test(inputStudentId)){msg.textContent="학번은 4자리 또는 5자리 숫자로 입력하세요.";return;}
+  btn.disabled=true;msg.textContent="본인 확인 중…";
+  try{
+    const user=await ensureAssessmentAuth(),{studentId}=await createTwoStageSession(a,user,inputStudentId,studentName,code,stage);
+    const attemptRef=fb.fsMod.doc(fb.db,"publicCourses",projectId,"assessments",a.id,"attempts",studentId),contentRef=fb.fsMod.doc(fb.db,"publicCourses",projectId,"assessments",a.id,"content","main");
+    const attemptSnap=await assessmentOpWithRetry("기존 기록 확인",()=>fb.fsMod.getDoc(attemptRef));
+    let attemptData=attemptSnap.exists()?{id:attemptSnap.id,...attemptSnap.data(),studentId}:null;
+    if(stage==="PHASE2_OPEN"&&!attemptData){
+      const initialAttempt={studentId,studentName,className:selectedClass,authUid:user.uid,mode:TWO_STAGE_MODE,phase2Status:"IN_PROGRESS",phase2:{},extraMaterials:[],phase3Status:"NOT_STARTED"};
+      await assessmentOpWithRetry("2차시 기록 생성",()=>fb.fsMod.setDoc(attemptRef,{...initialAttempt,createdAt:fb.fsMod.serverTimestamp(),updatedAt:fb.fsMod.serverTimestamp()}));
+      // 생성 직후 같은 문서를 다시 읽지 않고 이미 알고 있는 초기값을 사용합니다.
+      attemptData={id:studentId,...initialAttempt};
+    }
+    if(!attemptData)throw new Error("2차시 제출 기록이 없습니다. 선생님께 확인해 주세요.");
+    twoStageAttempt=attemptData;
+    if(stage==="MATERIAL_WINDOW"&&twoStageAttempt.phase2Status!=="SUBMITTED")throw new Error("2차시 제출이 완료되지 않아 추가자료를 등록할 수 없습니다.");
+    if(stage==="PHASE3_OPEN"&&twoStageAttempt.phase2Status!=="SUBMITTED")throw new Error("2차시 제출 기록이 없어 3차시에 입장할 수 없습니다.");
+    const contentSnap=await assessmentOpWithRetry("평가 자료 불러오기",()=>fb.fsMod.getDoc(contentRef));if(!contentSnap.exists())throw new Error("평가 자료를 불러올 수 없습니다.");twoStageContent={id:contentSnap.id,...contentSnap.data()};
+    if(stage==="PHASE2_OPEN"){
+      activeTwoStagePhase="PHASE2";twoStageLastServerSaveMs=timestampMs(twoStageAttempt.phase2LastSavedAt)||Date.now();const local=readTwoStageLocal(a.id,studentId,"phase2",{});twoStagePhase2=twoStageAttempt.phase2Status==="SUBMITTED"?{...(twoStageAttempt.phase2||{})}:{...(twoStageAttempt.phase2||{}),...local};twoStageDirty=Object.keys(local).length>0&&twoStageAttempt.phase2Status!=="SUBMITTED";
+    }else if(stage==="MATERIAL_WINDOW"){
+      activeTwoStagePhase="MATERIAL";twoStageLastServerSaveMs=0;twoStagePhase2={...(twoStageAttempt.phase2||{})};
+    }else if(stage==="PHASE3_OPEN"){
+      activeTwoStagePhase="PHASE3";twoStageLastServerSaveMs=timestampMs(twoStageAttempt.phase3LastSavedAt)||Date.now();twoStagePhase2={...(twoStageAttempt.phase2||{})};const local=readTwoStageLocal(a.id,studentId,"phase3",{});twoStagePhase3Essay=twoStageAttempt.phase3Status==="SUBMITTED"?String(twoStageAttempt.phase3Essay||""):String(local.essay??twoStageAttempt.phase3Essay??"");twoStageDirty=Boolean(local.essay)&&twoStageAttempt.phase3Status!=="SUBMITTED";
+      if(twoStageAttempt.phase3Status!=="SUBMITTED"&&twoStageAttempt.phase3Status!=="IN_PROGRESS"){
+        await assessmentOpWithRetry("3차시 시작 기록",()=>fb.fsMod.setDoc(attemptRef,{phase3Status:"IN_PROGRESS",phase3StartedAt:fb.fsMod.serverTimestamp(),lastSeenAt:fb.fsMod.serverTimestamp(),updatedAt:fb.fsMod.serverTimestamp()},{merge:true}));twoStageAttempt.phase3Status="IN_PROGRESS";
+      }
+    }
+    msg.textContent="";renderAssessmentPortal();if(twoStageDirty)scheduleTwoStageSave();
+  }catch(err){console.error(err);const m=String(err?.message||err||"");msg.textContent=m.includes("2차시")||m.includes("3차시")?m:"입장할 수 없습니다. 학번·이름과 현재 단계의 응시코드를 확인하세요.";}finally{btn.disabled=false;}
+}
+function renderTeacherMaterialButtons(topic){
+  const mats=topic?.teacherMaterials||[];return mats.length?`<div class="two-stage-material-buttons">${mats.map((m,i)=>`<button type="button" class="action-btn secondary" data-teacher-material="${i}">📄 ${esc(m.title||`교사 자료 ${i+1}`)}</button>`).join("")}</div>`:`<div class="materials-empty compact"><span>교사 제공 자료가 아직 연결되지 않았습니다.</span></div>`;
+}
+function bindTeacherMaterialButtons(root,topic){root.querySelectorAll("[data-teacher-material]").forEach(b=>{const m=topic?.teacherMaterials?.[Number(b.dataset.teacherMaterial)];b.onclick=()=>openTwoStageUrlViewer(m?.title,m?.url);});}
+function phase2Field(label,key,placeholder){return `<label class="two-stage-answer-field"><b>${esc(label)}</b><textarea data-phase2-key="${esc(key)}" placeholder="${esc(placeholder)}">${esc(twoStagePhase2[key]||"")}</textarea></label>`;}
+function renderTwoStagePhase2(root,a){
+  const submitted=twoStageAttempt.phase2Status==="SUBMITTED",topics=twoStageContent?.topicSets||[],topic=twoStageTopic(),prop=twoStageProposition();
+  root.innerHTML=`<div class="assessment-exam two-stage-phase"><div class="assessment-exam-head"><div><span class="assessment-open-badge">${submitted?"2차시 제출 완료":"2차시 · 사고과정 평가"}</span><h3>${esc(twoStageContent.title||a.title)}</h3><div class="assessment-instructions">많이 쓰는 평가가 아니라, 자료를 읽은 흔적과 생각이 연결되는지를 봅니다.</div></div><div class="save-state" id="twoStageSaveState">${submitted?"제출 완료":"이 기기에 즉시 저장"}</div></div>${twoStageIdentity()}<section class="two-stage-block"><h4>1. 지문 선택</h4><div class="two-stage-topic-select">${topics.map(t=>`<button type="button" class="topic-choice ${String(t.id)===String(twoStagePhase2.topicId)?"active":""}" data-topic-choice="${esc(t.id)}" ${submitted?"disabled":""}>${esc(t.title)}</button>`).join("")}</div></section>${topic?`<section class="two-stage-block"><h4>2. 교사 제공 자료 확인</h4>${renderTeacherMaterialButtons(topic)}</section><section class="two-stage-block"><h4>3. 논제 선택</h4><div class="proposition-list">${(topic.propositions||[]).map((p,i)=>`<label class="proposition-choice ${String(p.id)===String(twoStagePhase2.propositionId)?"active":""}"><input type="radio" name="twoStageProp" value="${esc(p.id)}" ${String(p.id)===String(twoStagePhase2.propositionId)?"checked":""} ${submitted?"disabled":""}><span><b>논제 ${i+1}</b>${esc(p.text)}</span></label>`).join("")}</div></section>`:""}<section class="two-stage-block"><h4>4. 사고 과정 기록</h4><div class="two-stage-answer-grid">${phase2Field("이 지문을 선택한 이유","selectionReason","관심을 가진 이유를 구체적으로 적으세요.")}${phase2Field("선택 논제와 원지문의 연결","passageConnection","원지문의 어떤 내용에서 이 논제가 나올 수 있는지 설명하세요.")}${phase2Field("핵심 쟁점·충돌 관점","conflictAnalysis","무엇과 무엇이 충돌하는 문제인지 자신의 말로 정리하세요.")}${phase2Field("다른 두 논제가 아니라 이 논제를 선택한 이유","propositionChoiceReason","세 논제를 비교해 선택 이유를 적으세요.")}${phase2Field("찬성 측 핵심 근거","proGround","찬성 측에서 가장 중요하다고 보는 근거를 적으세요.")}${phase2Field("반대 측 핵심 근거","conGround","반대 측에서 가장 중요하다고 보는 근거를 적으세요.")}${phase2Field("현재 자신의 입장과 이유","stanceReason","찬성/반대 입장과 그 이유를 적으세요.")}</div></section>${submitted?`<div class="submitted-box"><b>2차시 답안이 제출되었습니다.</b><span>이 답안은 수정할 수 없습니다. 선생님이 2차시를 종료하면 추가자료 사전등록 단계가 열립니다.</span><button class="action-btn secondary" id="leaveTwoStageBtn">포털로 돌아가기</button></div>`:`<div class="assessment-submit-bar"><span>입력 내용은 브라우저에 즉시 저장되고 서버에는 약 5분 간격으로 백업됩니다.</span><button class="action-btn primary" id="submitTwoStagePhase2Btn">2차시 최종 제출</button></div>`}</div>`;
+  bindTeacherMaterialButtons(root,topic);
+  root.querySelectorAll("[data-topic-choice]").forEach(b=>b.onclick=()=>{twoStagePhase2.topicId=b.dataset.topicChoice;twoStagePhase2.propositionId="";markTwoStagePhase2Dirty();renderTwoStagePhase2(root,a);});
+  root.querySelectorAll('input[name="twoStageProp"]').forEach(r=>r.onchange=()=>{twoStagePhase2.propositionId=r.value;markTwoStagePhase2Dirty();renderTwoStagePhase2(root,a);});
+  root.querySelectorAll("[data-phase2-key]").forEach(t=>{t.disabled=submitted;t.oninput=()=>{twoStagePhase2[t.dataset.phase2Key]=t.value;markTwoStagePhase2Dirty();};});
+  if(submitted){$("leaveTwoStageBtn").onclick=leaveTwoStageAssessment;}else $("submitTwoStagePhase2Btn").onclick=async()=>{const missing=phase2RequiredKeys().filter(k=>!String(twoStagePhase2[k]||"").trim());if(missing.length){alert("지문·논제 선택과 모든 사고 과정 항목을 작성한 뒤 제출해 주세요.");return;}if(!confirm("2차시 답안을 최종 제출할까요? 제출 후에는 수정할 수 없습니다."))return;await saveTwoStagePhase2(true);};
+}
+function renderTwoStageMaterial(root,a){
+  const topic=twoStageTopic(),files=Array.isArray(twoStageAttempt.extraMaterials)?twoStageAttempt.extraMaterials:[],max=Number(twoStageContent?.extraMaterialMaxFiles??a.extraMaterialMaxFiles??3),maxMb=Math.round(Number(twoStageContent?.extraMaterialMaxBytes||5*1024*1024)/1024/1024),atLimit=files.length>=max;
+  root.innerHTML=`<div class="two-stage-material-page"><button class="back-link" id="leaveTwoStageBtn">← 포털로 돌아가기</button><div class="assessment-login-title"><span class="assessment-open-badge">추가자료 사전등록</span><h3>${esc(a.title)}</h3><p>2차시에서 선택한 논제에 사용할 추가자료가 있는 학생만 등록하세요. 교사 제공 자료만으로도 수행평가를 완료할 수 있습니다.</p></div>${twoStageIdentity()}<section class="two-stage-block selected-proposition"><h4>선택 논제</h4><p>${esc(twoStagePhase2.propositionText||twoStageProposition()?.text||"")}</p></section><section class="two-stage-block"><h4>추가자료 등록</h4><div class="template-download-box"><a class="action-btn secondary" href="./assets/추가자료_등록서식.docx" download>추가자료 등록 서식(DOCX)</a><span>서식에 <b>제목 · 출처 · 본문</b>을 작성한 뒤 PDF로 저장하여 올리세요.</span></div><div class="pdf-help"><b>DOCX → PDF</b><span>Word: 파일 → 다른 이름으로 저장 → PDF</span><span>한글: 파일 → PDF로 저장하기</span><span>Google Docs: 파일 → 다운로드 → PDF 문서(.pdf)</span></div><input id="extraMaterialFileInput" class="sr-only-file" type="file" accept="application/pdf,.pdf"><button type="button" class="pdf-upload-box ${atLimit?"disabled":""}" id="extraMaterialAddBtn" ${atLimit?"disabled":""}><b>${atLimit?"등록 한도 도달":"PDF 선택"}</b><span>최대 ${max}개 · 파일당 ${maxMb}MB 이하${atLimit?" · 기존 파일은 교체 가능":""}</span></button><div id="extraUploadState" class="save-state"></div><div class="extra-material-list">${files.length?files.map((f,i)=>`<article><div><b>${esc(f.name||`추가자료 ${i+1}.pdf`)}</b><small>${Math.max(1,Math.round(Number(f.size||0)/1024))}KB</small></div><div><button type="button" class="action-btn secondary" data-extra-view="${esc(f.id)}">보기</button><button type="button" class="action-btn secondary" data-extra-replace="${esc(f.id)}">교체</button><button type="button" class="action-btn danger-lite" data-extra-delete="${esc(f.id)}">삭제</button></div></article>`).join(""):`<div class="materials-empty compact"><b>등록된 추가자료가 없습니다.</b><span>추가자료가 필요하지 않다면 아무것도 올리지 않아도 됩니다.</span></div>`}</div><p class="small muted">3차시 시작 버튼을 선생님이 누르는 순간 등록 자료가 잠기며 이후 추가·교체·삭제할 수 없습니다.</p></section></div>`;
+  $("leaveTwoStageBtn").onclick=leaveTwoStageAssessment;const input=$("extraMaterialFileInput"),addBtn=$("extraMaterialAddBtn");
+  if(addBtn)addBtn.onclick=()=>{if(atLimit)return;twoStageReplaceMaterialId=null;input?.click();};
+  if(input)input.onchange=e=>{const f=e.target.files?.[0];e.target.value="";const replaceId=twoStageReplaceMaterialId;twoStageReplaceMaterialId=null;if(f)uploadExtraMaterialPdf(f,replaceId);};
+  root.querySelectorAll("[data-extra-view]").forEach(b=>b.onclick=()=>openTwoStageDriveViewer(files.find(f=>String(f.id)===String(b.dataset.extraView))));
+  root.querySelectorAll("[data-extra-replace]").forEach(b=>b.onclick=()=>{twoStageReplaceMaterialId=b.dataset.extraReplace;input?.click();});
+  root.querySelectorAll("[data-extra-delete]").forEach(b=>b.onclick=()=>deleteExtraMaterialPdf(b.dataset.extraDelete));
+}
+async function uploadExtraMaterialPdf(file,replaceId=null){
+  const a=assessmentById(selectedAssessmentId),stage=selectedClassStage(a),state=$("extraUploadState");if(stage!=="MATERIAL_WINDOW"){alert("추가자료 등록기간이 종료되었습니다.");renderAssessmentPortal();return;}
+  if(file.type!=="application/pdf"&&!file.name.toLowerCase().endsWith(".pdf")){alert("PDF 파일만 등록할 수 있습니다.");return;}
+  const maxBytes=Number(twoStageContent?.extraMaterialMaxBytes||5*1024*1024);if(file.size>maxBytes){alert(`파일은 ${Math.round(maxBytes/1024/1024)}MB 이하만 등록할 수 있습니다.`);return;}
+  const files=Array.isArray(twoStageAttempt.extraMaterials)?[...twoStageAttempt.extraMaterials]:[],max=Number(twoStageContent?.extraMaterialMaxFiles??3);if(!replaceId&&files.length>=max){alert(`추가자료는 최대 ${max}개까지 등록할 수 있습니다.`);return;}
+  const id=replaceId||crypto.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try{
+    if(state)state.textContent="PDF를 선생님 Drive에 업로드 중…";
+    const fileBase64=arrayBufferToBase64_(await file.arrayBuffer());
+    const result=await driveBridgeRequest_("upload",{materialId:id,fileName:file.name,fileSize:file.size,fileBase64},90000);
+    twoStageAttempt.extraMaterials=Array.isArray(result.extraMaterials)?result.extraMaterials:files;
+    if(state)state.textContent="Drive 등록 완료";renderTwoStageMaterial($("assessmentPortalBody"),a);
+  }catch(err){console.error(err);if(state)state.textContent="업로드 실패";alert(`PDF 업로드에 실패했습니다. ${err.message||err}`);}
+}
+async function deleteExtraMaterialPdf(id){
+  const a=assessmentById(selectedAssessmentId);if(selectedClassStage(a)!=="MATERIAL_WINDOW"){alert("추가자료 등록기간이 종료되었습니다.");return;}const files=Array.isArray(twoStageAttempt.extraMaterials)?[...twoStageAttempt.extraMaterials]:[],target=files.find(f=>String(f.id)===String(id));if(!target||!confirm(`「${target.name}」을 삭제할까요?`))return;
+  try{const result=await driveBridgeRequest_("delete",{materialId:id},45000);twoStageAttempt.extraMaterials=Array.isArray(result.extraMaterials)?result.extraMaterials:files.filter(f=>String(f.id)!==String(id));renderTwoStageMaterial($("assessmentPortalBody"),a);}catch(err){alert(`삭제 실패: ${err.message||err}`);}
+}
+function renderPhase2Review(){
+  const p=twoStagePhase2;return `<div class="phase2-review"><div><b>선택 지문</b><span>${esc(p.topicTitle||"")}</span></div><div><b>선택 논제</b><span>${esc(p.propositionText||"")}</span></div><div><b>지문 선택 이유</b><span>${esc(p.selectionReason||"")}</span></div><div><b>원지문 연결</b><span>${esc(p.passageConnection||"")}</span></div><div><b>핵심 쟁점</b><span>${esc(p.conflictAnalysis||"")}</span></div><div><b>논제 선택 이유</b><span>${esc(p.propositionChoiceReason||"")}</span></div><div><b>찬성 근거</b><span>${esc(p.proGround||"")}</span></div><div><b>반대 근거</b><span>${esc(p.conGround||"")}</span></div><div><b>나의 입장</b><span>${esc(p.stanceReason||"")}</span></div></div>`;
+}
+function renderTwoStagePhase3(root,a){
+  const submitted=twoStageAttempt.phase3Status==="SUBMITTED",topic=twoStageTopic(),files=Array.isArray(twoStageAttempt.extraMaterials)?twoStageAttempt.extraMaterials:[];
+  root.innerHTML=`<div class="assessment-exam two-stage-phase3"><div class="assessment-exam-head"><div><span class="assessment-open-badge">${submitted?"최종 제출 완료":"3차시 · 최종 입론서 작성"}</span><h3>${esc(a.title)}</h3><div class="assessment-instructions">이 화면에 표시된 교사 제공 자료, 2차시 기록, 사전 등록 PDF만 확인하며 작성하세요.</div></div><div class="save-state" id="twoStageSaveState">${submitted?"제출 완료":"이 기기에 즉시 저장"}</div></div>${twoStageIdentity()}<div class="two-stage-phase3-layout"><aside class="two-stage-reference-panel"><section><h4>선택 논제</h4><p class="selected-proposition-text">${esc(twoStagePhase2.propositionText||"")}</p></section><section><h4>2차시 사고 기록</h4>${renderPhase2Review()}</section><section><h4>교사 제공 자료</h4>${renderTeacherMaterialButtons(topic)}</section><section><h4>사전 등록 추가자료</h4>${files.length?files.map((f,i)=>`<button type="button" class="action-btn secondary full-btn" data-extra-view="${esc(f.id)}">📄 ${esc(f.name||`추가자료 ${i+1}.pdf`)}</button>`).join(""):`<span class="small muted">등록한 추가자료 없음</span>`}</section></aside><main class="two-stage-writing-panel"><label><div class="writing-title"><b>최종 토론 입론서</b><span id="phase3CharCount">${twoStagePhase3Essay.length}자</span></div><textarea id="phase3Essay" data-two-stage-final="1" ${submitted?"disabled":""} placeholder="논제와 입장을 분명히 밝히고, 주장·이유·근거, 예상 반론과 반박, 결론이 연결되도록 작성하세요.">${esc(twoStagePhase3Essay)}</textarea></label>${submitted?`<div class="submitted-box"><b>최종 입론서가 제출되었습니다.</b><span>제출 후에는 수정할 수 없습니다.</span><button class="action-btn secondary" id="leaveTwoStageBtn">포털로 돌아가기</button></div>`:`<div class="assessment-submit-bar"><span>화면이 3초 이상 숨겨진 경우와 답안칸의 실제 붙여넣기는 감독 참고 기록으로 남습니다. 별도 heartbeat는 사용하지 않습니다.</span><button class="action-btn primary" id="submitTwoStagePhase3Btn">최종 제출</button></div>`}</main></div></div>`;
+  bindTeacherMaterialButtons(root,topic);root.querySelectorAll("[data-extra-view]").forEach(b=>b.onclick=()=>openTwoStageDriveViewer(files.find(f=>String(f.id)===String(b.dataset.extraView))));
+  const ta=$("phase3Essay");if(ta&&!submitted)ta.oninput=()=>{twoStagePhase3Essay=ta.value;$("phase3CharCount").textContent=`${ta.value.length}자`;markTwoStagePhase3Dirty();};
+  if(submitted)$("leaveTwoStageBtn").onclick=leaveTwoStageAssessment;else $("submitTwoStagePhase3Btn").onclick=async()=>{if(!String(twoStagePhase3Essay||"").trim()){alert("입론서를 작성한 뒤 제출해 주세요.");return;}if(!confirm("최종 입론서를 제출할까요? 제출 후에는 수정할 수 없습니다."))return;await saveTwoStagePhase3(true);};
+}
+function renderTwoStageActive(root){
+  const a=assessmentById(selectedAssessmentId);if(!a){leaveTwoStageAssessment();return;}const stage=selectedClassStage(a),expected=twoStagePhaseForStage(stage);
+  if(activeTwoStagePhase!==expected){root.innerHTML=`<div class="submitted-box"><b>현재 단계가 변경되었습니다.</b><span>선생님이 ${esc(TWO_STAGE_LABELS[stage]||stage)} 단계로 전환했습니다. 포털로 돌아가 다시 입장하세요.</span><button class="action-btn secondary" id="leaveTwoStageBtn">포털로 돌아가기</button></div>`;$("leaveTwoStageBtn").onclick=leaveTwoStageAssessment;return;}
+  if(activeTwoStagePhase==="PHASE2")renderTwoStagePhase2(root,a);else if(activeTwoStagePhase==="MATERIAL")renderTwoStageMaterial(root,a);else renderTwoStagePhase3(root,a);
 }
 
 function renderAssessmentLogin(root,a){
@@ -989,43 +1256,43 @@ async function init(){
   }
 }
 document.addEventListener("visibilitychange",()=>{
+  if(activeTwoStagePhase==="PHASE3"&&twoStageAttempt?.phase3Status!=="SUBMITTED"){
+    if(document.visibilityState==="hidden"){
+      twoStageHiddenSince=Date.now();twoStageHiddenRecorded=false;if(twoStageHiddenTimer)clearTimeout(twoStageHiddenTimer);
+      twoStageHiddenTimer=setTimeout(()=>{twoStageHiddenTimer=null;if(activeTwoStagePhase==="PHASE3"&&document.visibilityState==="hidden"&&!twoStageHiddenRecorded){twoStageHiddenRecorded=true;pushTwoStageMonitorEvent("FOCUS_LOSS","화면이 3초 이상 숨겨짐");}},3000);
+    }else{
+      if(twoStageHiddenTimer)clearTimeout(twoStageHiddenTimer);twoStageHiddenTimer=null;const hiddenFor=twoStageHiddenSince?Date.now()-twoStageHiddenSince:0;if(hiddenFor>=3000&&!twoStageHiddenRecorded){twoStageHiddenRecorded=true;pushTwoStageMonitorEvent("FOCUS_LOSS",`화면 숨김 약 ${Math.max(3,Math.round(hiddenFor/1000))}초`);}twoStageHiddenSince=0;
+    }
+    return;
+  }
   if(!activeAttempt||activeAttempt.status!=="IN_PROGRESS")return;
   if(document.visibilityState==="hidden"){
     assessmentHiddenSinceMs=Date.now();assessmentHiddenEventRecorded=false;
     if(assessmentHiddenTimer)clearTimeout(assessmentHiddenTimer);
-    assessmentHiddenTimer=setTimeout(()=>{
-      assessmentHiddenTimer=null;
-      if(activeAttempt&&activeAttempt.status==="IN_PROGRESS"&&document.visibilityState==="hidden"&&!assessmentHiddenEventRecorded){
-        assessmentHiddenEventRecorded=true;recordFocusLoss("화면이 3초 이상 숨겨짐");
-      }
-    },3000);
+    assessmentHiddenTimer=setTimeout(()=>{assessmentHiddenTimer=null;if(activeAttempt&&activeAttempt.status==="IN_PROGRESS"&&document.visibilityState==="hidden"&&!assessmentHiddenEventRecorded){assessmentHiddenEventRecorded=true;recordFocusLoss("화면이 3초 이상 숨겨짐");}},3000);
   }else{
     if(assessmentHiddenTimer)clearTimeout(assessmentHiddenTimer);assessmentHiddenTimer=null;
     const hiddenFor=assessmentHiddenSinceMs?Date.now()-assessmentHiddenSinceMs:0;
-    if(hiddenFor>=3000&&!assessmentHiddenEventRecorded){assessmentHiddenEventRecorded=true;recordFocusLoss(`화면 숨김 약 ${Math.max(3,Math.round(hiddenFor/1000))}초`);}
-    assessmentHiddenSinceMs=0;
+    if(hiddenFor>=3000&&!assessmentHiddenEventRecorded){assessmentHiddenEventRecorded=true;recordFocusLoss(`화면 숨김 약 ${Math.max(3,Math.round(hiddenFor/1000))}초`);}assessmentHiddenSinceMs=0;
   }
 });
-document.addEventListener("copy",e=>{if(activeAttempt&&activeAttempt.status==="IN_PROGRESS"&&e.target?.closest?.("[data-answer-id]"))pushMonitorEvent("COPY","답안 입력칸에서 실제 복사 실행");});
-document.addEventListener("paste",e=>{if(activeAttempt&&activeAttempt.status==="IN_PROGRESS"&&e.target?.closest?.("[data-answer-id]"))pushMonitorEvent("PASTE","답안 입력칸에 실제 붙여넣기 실행");});
+document.addEventListener("copy",e=>{if(activeTwoStagePhase==="PHASE3"&&e.target?.closest?.("[data-two-stage-final]")){pushTwoStageMonitorEvent("COPY","최종 입론서 입력칸에서 실제 복사 실행");return;}if(activeAttempt&&activeAttempt.status==="IN_PROGRESS"&&e.target?.closest?.("[data-answer-id]"))pushMonitorEvent("COPY","답안 입력칸에서 실제 복사 실행");});
+document.addEventListener("paste",e=>{if(activeTwoStagePhase==="PHASE3"&&e.target?.closest?.("[data-two-stage-final]")){pushTwoStageMonitorEvent("PASTE","최종 입론서 입력칸에 실제 붙여넣기 실행");return;}if(activeAttempt&&activeAttempt.status==="IN_PROGRESS"&&e.target?.closest?.("[data-answer-id]"))pushMonitorEvent("PASTE","답안 입력칸에 실제 붙여넣기 실행");});
 window.addEventListener("offline",()=>{
+  if(activeTwoStagePhase){const st=$("twoStageSaveState")||$("extraUploadState");if(st)st.textContent="오프라인 · 작성 내용은 이 기기에 보관됨";return;}
   if(!activeAttempt||activeAttempt.status==="SUBMITTED")return;
   wasOfflineDuringAttempt=true;pendingMonitorEvents.push({type:"OFFLINE",at:new Date().toISOString(),detail:"네트워크 연결 끊김"});
   const st=$("assessmentSaveState");if(st)st.textContent="오프라인 · 답안은 이 기기에 임시 보관";
 });
 window.addEventListener("online",async()=>{
-  if(activeAttempt&&activeAttempt.status==="SUBMITTED"){
-    if(activeAttempt.forcedFinalized)await preserveForcedFinalizationRecovery(activeAttempt,activeAttempt.studentId);
-    await scanAndSyncRecoveryBackups();return;
-  }
+  if(activeTwoStagePhase){if(twoStageDirty&&!twoStageSaving){if(activeTwoStagePhase==="PHASE2")await saveTwoStagePhase2(false);if(activeTwoStagePhase==="PHASE3")await saveTwoStagePhase3(false);}return;}
+  if(activeAttempt&&activeAttempt.status==="SUBMITTED"){if(activeAttempt.forcedFinalized)await preserveForcedFinalizationRecovery(activeAttempt,activeAttempt.studentId);await scanAndSyncRecoveryBackups();return;}
   if(!activeAttempt)return;
   if(wasOfflineDuringAttempt){pendingMonitorEvents.push({type:"ONLINE",at:new Date().toISOString(),detail:"네트워크 재연결"});wasOfflineDuringAttempt=false;}
-  if(assessmentDirty&&!assessmentSaving)await saveAssessmentAttempt().catch(()=>false);
-  else await sendAssessmentHeartbeat({force:true});
+  if(assessmentDirty&&!assessmentSaving)await saveAssessmentAttempt().catch(()=>false);else await sendAssessmentHeartbeat({force:true});
   const key=`${assessmentBackupKey(selectedAssessmentId,activeAttempt.studentId)}_pendingSubmit`;
-  if(localStorage.getItem(key)){const auto=localStorage.getItem(key)==="AUTO";const ok=await submitAssessmentWithRetry(auto,5);if(ok)localStorage.removeItem(key);}
-  await scanAndSyncRecoveryBackups();
+  if(localStorage.getItem(key)){const auto=localStorage.getItem(key)==="AUTO";const ok=await submitAssessmentWithRetry(auto,5);if(ok)localStorage.removeItem(key);}await scanAndSyncRecoveryBackups();
 });
-// v1.7.0: 서버 저장은 남은 시간에 따라 단계적으로 조정하고, 접속 생존 신호는 60초 주기로만 보낸다.
+// v1.8.1: 기존 시험형만 60초 heartbeat를 사용합니다. 2단계형은 heartbeat 없이 저빈도 답안 백업만 사용합니다.
 setInterval(()=>{if(activeAttempt&&activeAttempt.status!=="SUBMITTED")sendAssessmentHeartbeat();},60000);
 init();
